@@ -1,0 +1,16 @@
+node_modules/
+.backup/
+.scratch/
+.research-scratch/
+.tmp-acp/
+*.log
+.DS_Store
+Thumbs.db
+
+# 误拷贝进仓库根目录的 DSH asar 索引：五个文件字节完全相同（SHA256 F4D6D636…），
+# 每个 1.15MB。它们不被 package.json 的 files 引用，也从来没进过包——不该进仓库。
+asar-index.json
+dsh-agent-preset
+dsh-hmr
+plugin
+plugin-manager

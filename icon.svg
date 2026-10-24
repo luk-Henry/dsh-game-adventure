@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- 回望厅：一扇安静的小木门 -->
+  <path d="M752 880V400a240 240 0 0 0-480 0v480z" fill="#B98A5A"/>
+  <path d="M712 840V400a200 200 0 0 0-400 0v440z" fill="#A87A4C"/>
+  <path d="M752 880V400a240 240 0 0 0-480 0v480" fill="none" stroke="#8A6240" stroke-width="28"/>
+  <path d="M312 840V400a200 200 0 0 1 400 0v440" fill="none" stroke="#8A6240" stroke-width="16"/>
+  <circle cx="650" cy="576" r="30" fill="#E0B96E"/>
+  <path d="M272 880h480" fill="none" stroke="#6F4E33" stroke-width="40" stroke-linecap="round"/>
+</svg>
