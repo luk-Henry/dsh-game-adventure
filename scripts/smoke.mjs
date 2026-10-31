@@ -6568,27 +6568,30 @@ if (HAVE_MAP_FIXTURE) {
   const landHits = ['west', 'north', 'east', 'isles'].filter((k) => svgNow.includes(`url(#grasstex-${k})`))
   check('四块陆地名下的底色各不相同（M-9）', landHits.length === 4, `${landHits.length}/4`)
 
-  // ⑤ 国名的字号（2026-10-31 t24 抬到 1.06，t30 抬到 1.11）。
+  // ⑤ 国名的字号（2026-10-31：t24 抬到 1.06、t30 按真实宽度改成 1.11、t35 收到真宿主口径 1.13）。
   //
   //    **这一段只证「源码常数」，不证几何。** 分工写在最前面，别再往这里塞几何断言：
-  //    - **几何归 `scripts/look.mjs`**：它在真无头 Edge 里用 `getBoundingClientRect`
-  //      量「面板宽 − 44 = 地图本体宽」「每单位多少 px」「二级国名等效字号 ≥ 8.5px」
-  //      「一级 ≥ 9px」，四个尺寸各量一次。真几何一变，那里会红。
+  //    - **几何归 `scripts/look.mjs`**：它在真无头 Edge 里用 `getBoundingClientRect` 量
+  //      「地图本体宽 = 面板宽 − 左右留白（左 22、右 22 + 滚动条空档）− 左右各 1px 边框」
+  //      「每单位多少 px」「二级国名等效字号 ≥ 8.5px」「一级 ≥ 9px」，四个尺寸各量一次；
+  //      字号那几条还按**两个分母**各判一遍（当页实测宽 + 真宿主最窄 499px）。真几何一变，那里会红。
   //    - **smoke 是手搓的 DOM 垫片，没有排版能力**：`getBoundingClientRect` 可能压根没有，
   //      `clientWidth` 给的是 350 这种假数。所以这里**不再「试着量一下、量不到退回常量」**——
   //      那种写法看着在量事实，实际在比常数（t31 复核点名的就是它）。
   //
   // 这里能证的只有两件真事：① 源码里的 `NATION_FS` 与期望一致（改回旧值就红）；
   // ② 拿 look.mjs 四尺寸实测的地图本体宽当分母，等效字号够 8.5 / 9。
-  const MAP_WIDTH_PX = 508 // look.mjs 四个尺寸实测（面板 560 − 左右各 22px padding = 508）
+  // ⚠ 分母 508 是**预览页**的地图宽；真宿主滚动条是 15px（不是 6px），那里只有 499px，
+  //    所以「真宿主也够 8.5」这件事只能由 look.mjs 按两个分母判，本文件不代劳。
+  const MAP_WIDTH_PX = 508 // look.mjs 四尺寸实测（面板 560 − 左 22 − 右 22+6 滚动条空档 − 边框 2 = 508）
   const FRAME_W = 66
   // 字号从 `src/map/world.js` 的源码里读（`NATION_FS` 是模块私有常量，不为了自检改成导出）。
   const worldSrc = readFileSync(new URL('../src/map/world.js', import.meta.url), 'utf8')
   const fsPair = /const NATION_FS = \{ 1: ([\d.]+), 2: ([\d.]+) \}/.exec(worldSrc)
   const fs1 = fsPair ? Number(fsPair[1]) : NaN
   const fs2 = fsPair ? Number(fsPair[2]) : NaN
-  check('源码里的国名字号是 一级 1.22 / 二级 1.11（smoke 只证常数，几何归 look.mjs）',
-    fs1 === 1.22 && fs2 === 1.11, `读到 ${fsPair ? `${fsPair[1]} / ${fsPair[2]}` : 'NATION_FS 没解析出来'}`)
+  check('源码里的国名字号是 一级 1.22 / 二级 1.13（smoke 只证常数，几何归 look.mjs）',
+    fs1 === 1.22 && fs2 === 1.13, `读到 ${fsPair ? `${fsPair[1]} / ${fsPair[2]}` : 'NATION_FS 没解析出来'}`)
   const t1px = (fs1 * MAP_WIDTH_PX) / FRAME_W
   const t2px = (fs2 * MAP_WIDTH_PX) / FRAME_W
   const szTag = (fs) => fs.toFixed(2)
@@ -6600,8 +6603,9 @@ if (HAVE_MAP_FIXTURE) {
     `${szTag(fs1)} × ${t1Count} / ${szTag(fs2)} × ${t2Count} / 0.92 × ${nationSizes.filter((v) => v === '0.92').length}`)
 
   // ⑤之二 等效字号（**算式层面**）：字号 × 地图本体宽 / 取景框宽 ≥ 8.5px。
-  // 分母 508 抄自 look.mjs 四尺寸实测；**真几何对不对由 look.mjs 断言，这里不量**。
-  check(`二级国名等效字号 ≥ 8.5px（${szTag(fs2)} × ${MAP_WIDTH_PX} / ${FRAME_W} = ${t2px.toFixed(2)}px，t30）`,
+  // 分母 508 抄自 look.mjs 四尺寸实测（预览页口径）；**真几何对不对由 look.mjs 断言，这里不量**。
+  // 真宿主是 499px（滚动条 15px），1.13 × 499 / 66 = 8.54px 也过——那一半由 look.mjs 判。
+  check(`二级国名等效字号 ≥ 8.5px（${szTag(fs2)} × ${MAP_WIDTH_PX} / ${FRAME_W} = ${t2px.toFixed(2)}px，t30/t35）`,
     t2px >= 8.5, `${t2px.toFixed(2)}px（分母用 look.mjs 实测常量 ${MAP_WIDTH_PX}px；几何本身归 look.mjs）`)
   check(`一级国名等效字号 ≥ 9px（${szTag(fs1)} × ${MAP_WIDTH_PX} / ${FRAME_W} = ${t1px.toFixed(2)}px，t30）`,
     t1px >= 9, `${t1px.toFixed(2)}px`)

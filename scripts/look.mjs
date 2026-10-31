@@ -37,7 +37,16 @@ const SHOTS = join(ROOT, '.scratch')
 // 地图本体宽的两个常数：取景框宽（世界单位）与面板左右 padding。
 // 前者是这张图的坐标系（`viewBox="0 0 66 34"` 的 66），后者是 CSS 里 `.gf-stage` 的左右各 22px。
 const FRAME_W = 66
-const PANEL_PAD_X = 22 // 单边；地图宽 = 面板宽 − 2 × 22
+const PANEL_PAD_X = 22 // 单边；下面断的是真算式（左右留白 + 边框），见断言处的注释
+
+// 真宿主的地图本体宽 **499px**（最窄实测口径）。
+// 出处：2026-10-05 用真 DSH 面板的量尺寸钩子量到「见闻录内容宽 499、padding box 514」
+// ⇒ 滚动条空档 `--gf-sb` 在真面板里是 **15px**（预览页只有 6px），见 src/client.js 里
+// syncGutter 上面那段注释。面板 560 − 左 22 − 右 (22 + 15) − 边框 2 = **499**。
+// 这个常数是「用户真正看到的那个宽度」：look 本身跑的是预览页，只能量到 508，
+// 所以要拿两个分母都判一遍——只按当页实测宽判，就会像 t24/t30 那样「量具比真机宽」还判自己达标。
+const HOST_MAP_WIDTH_PX = 499
+const HOST_GUTTER_PX = 15
 
 // 国名字号从源码读（`NATION_FS` 是模块私有常量，不为了自检改成导出）。
 // 读不到就让下面那条断言红——总比悄悄用旧默认值算出一个「达标」强。
@@ -250,10 +259,12 @@ for (const { w, h, m, file } of results) {
 
   // ── 几何（t33：这些从 smoke 搬过来的，只有真浏览器量得出来）─────────────────
   // 「地图本体宽 = 面板宽 − 44」这条**按现行 CSS 是不成立的**：44 只算了左右各 22px 的留白，
-  // 漏了面板左右各 1px 边框、以及右边那 6px 的滚动条空档（--gf-sb，见 .gf-stage 的
-  // margin: 12px calc(22px + var(--gf-sb)) 0 22px）。实测 560 − 22 − 28 − 2 = 508。
+  // 漏了面板左右各 1px 边框、以及右边那圈滚动条空档（--gf-sb，见 .gf-stage 的
+  // margin: 12px calc(22px + var(--gf-sb)) 0 22px）。预览页实测 560 − 22 − 28 − 2 = 508。
   // 所以这里断的是**真算式**：面板宽 − 左边留白 −（22 + 滚动条空档）− 左右边框 = 地图宽。
   // 谁把 padding / margin / 边框改一下，这个数就变，断言立刻红——这才是它该有的牙。
+  // 注意：这里量到的是**预览页**的宽度（--gf-sb = 6）；真宿主 --gf-sb = 15、地图只有 499px，
+  // 所以字号那几条另外按 HOST_MAP_WIDTH_PX 再判一遍（见下面「两个分母」）。
   const panelW = room.w
   const mapW = m.stageSvg.w
   const mLeft = m.stageMargin ? m.stageMargin.left : NaN
@@ -279,14 +290,27 @@ for (const { w, h, m, file } of results) {
     Number.isFinite(unitPx) && unitPx > 0, `地图宽 ${mapW} / ${FRAME_W} = ${unitPx.toFixed(3)}`])
 
   // 国名等效字号：字号（世界单位）× 每单位 px。这是「读不读得出来」的真凭据。
+  // **两个分母都要过**（t35）：当页实测宽（预览页 508）只是「这台机器量得到的那一个」，
+  // 真宿主的地图宽是 499（--gf-sb = 15 而不是 6，见文件头 HOST_MAP_WIDTH_PX 的出处），
+  // 那个才是用户真正看到的。只按当页宽判，就是「量具比真机宽 9px 还判自己达标」——
+  // t24 拿 560（面板宽）当分母、t30 拿 508（预览页地图宽）当分母，都是这同一个错的上下两层。
   const t1px = NATION_FS[1] * unitPx
   const t2px = NATION_FS[2] * unitPx
-  checks.push([`${tag} 二级国名等效字号 ≥ 8.5px（${NATION_FS[2]} × ${unitPx.toFixed(3)} = ${t2px.toFixed(2)}px）`,
+  const hostUnitPx = HOST_MAP_WIDTH_PX / FRAME_W
+  const t1Host = NATION_FS[1] * hostUnitPx
+  const t2Host = NATION_FS[2] * hostUnitPx
+  checks.push([`${tag} 二级国名等效字号 ≥ 8.5px（当页 ${mapW}px：${NATION_FS[2]} × ${unitPx.toFixed(3)} = ${t2px.toFixed(2)}px）`,
     Number.isFinite(t2px) && t2px >= 8.5,
     `${t2px.toFixed(2)}px（NATION_FS[2] = ${NATION_FS[2]}，每单位 ${unitPx.toFixed(3)}px）`])
-  checks.push([`${tag} 一级国名等效字号 ≥ 9px（${NATION_FS[1]} × ${unitPx.toFixed(3)} = ${t1px.toFixed(2)}px）`,
+  checks.push([`${tag} 二级国名等效字号 ≥ 8.5px（真宿主 ${HOST_MAP_WIDTH_PX}px：${NATION_FS[2]} × ${hostUnitPx.toFixed(3)} = ${t2Host.toFixed(2)}px）`,
+    Number.isFinite(t2Host) && t2Host >= 8.5,
+    `${t2Host.toFixed(2)}px（每单位 ${hostUnitPx.toFixed(3)}px = ${HOST_MAP_WIDTH_PX} / ${FRAME_W}）`])
+  checks.push([`${tag} 一级国名等效字号 ≥ 9px（当页 ${mapW}px：${NATION_FS[1]} × ${unitPx.toFixed(3)} = ${t1px.toFixed(2)}px）`,
     Number.isFinite(t1px) && t1px >= 9,
     `${t1px.toFixed(2)}px（NATION_FS[1] = ${NATION_FS[1]}）`])
+  checks.push([`${tag} 一级国名等效字号 ≥ 9px（真宿主 ${HOST_MAP_WIDTH_PX}px：${NATION_FS[1]} × ${hostUnitPx.toFixed(3)} = ${t1Host.toFixed(2)}px）`,
+    Number.isFinite(t1Host) && t1Host >= 9,
+    `${t1Host.toFixed(2)}px`])
 }
 
 let failed = 0
