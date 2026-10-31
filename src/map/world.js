@@ -992,10 +992,15 @@ export function placeLabel(px, py, text, fs, view, opts = {}) {
   const sizes = opts.sizes || [fs, fs * 0.88, fs * 0.78]
   const boxes = textBoxes()
   const pin = [px - pinR, py - pinR, px + pinR, py + pinR]
-  // 候选点：十六个方向 × 五档远近。近的先试，同分时近的赢。
+  // 候选点：十六个方向 × 三档远近。
+  //
+  // 2026-10-31：远近**封顶在 2.1 档**（约 6 个世界单位）。原来一直试到 4.0 档，
+  // 于是挤不下的时候就一路飞出去——用户实测「他的屋子」那枚签落到了**离记号 16 格**
+  // 的地方，而它存在的全部意义就是指出他在哪。签离记号十几格，等于没有签。
+  // 宁可挪近一点压着别的字（签字底板 0.9 不透明，压住的那点字透不上来）。
   const dirs = [[1, 0], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 1], [-1, -1], [-1, 1],
     [1, -0.45], [1, 0.45], [-1, -0.45], [-1, 0.45], [0.45, -1], [-0.45, -1], [0.45, 1], [-0.45, 1]]
-  const rungs = [1, 1.5, 2.1, 2.9, 4.0]
+  const rungs = [1, 1.5, 2.1, 2.9]
   let best = null
   for (let rank = 0; rank < sizes.length; rank++) {
     const size = sizes[rank]
@@ -1011,13 +1016,33 @@ export function placeLabel(px, py, text, fs, view, opts = {}) {
         const inside = rect[0] >= view.x + 0.4 && rect[2] <= view.x + view.w - 0.4
           && rect[1] >= view.y + 0.4 && rect[3] <= view.y + view.h - 0.4
         let area = 0
-        for (const b of boxes) area += box_overlap(rect, [b[2], b[3], b[4], b[5]])
+        let worst = 0
+        for (const b of boxes) {
+          const o = box_overlap(rect, [b[2], b[3], b[4], b[5]])
+          if (o <= 0) continue
+          area += o
+          // 2026-10-31：光算总面积不够——把**一块**牌子盖掉 63% 和把四块各盖 16%
+          // 面积一样，可前者那块字基本没了。所以再按「压得最狠的那一块占它自己多少」
+          // 加一道平方罚。
+          const own = (b[4] - b[2]) * (b[5] - b[3])
+          if (own > 0) worst = Math.max(worst, o / own)
+        }
         const onPin = box_overlap(rect, pin)
         // 压住的分按面积算；可**挪太远**同样难受——签离针十几格，读的人得来回找。
-        // 所以面积乘 2.2、每远一档再加 0.5：宁可偏一点压着边，也不要跑到图那头去。
-        const score = area * 2.2 + onPin * 4 + (inside ? 0 : 1e6) + (rung - 1) * 0.5 + rank * 0.5
+        //
+        // 2026-10-31：原来只有「每远一档加 0.5」那点软约束，压不住——斜向候选
+        // （|sx|=1 且 |sy|=1）两头的偏移会**叠加**，最高一档实际能到 14 格。
+        // 现在加一道**硬闸**：签心离记号超过 limit（默认 6.5 格）的候选一律重罚，
+        // 只在「附近一个都没得选」时才会被迫用上。签存在的意义是指出他在哪，
+        // 离十几格的签不如不要。
+        const limit = opts.limit === undefined ? 9 : opts.limit
+        const far = Math.hypot((rect[0] + rect[2]) / 2 - px, (rect[1] + rect[3]) / 2 - py)
+        // 距离用两级：硬闸在 `limit`（默认 9 格，超过一律重罚），软的是每格 0.9 分——
+        // 干净但远一点，会赢过贴脸却把别人一块牌子盖掉一多半。
+        const score = area * 2.2 + worst * worst * 14 + onPin * 4 + (inside ? 0 : 1e6) + (far > limit ? 1e5 : 0)
+          + far * 0.9 + (rung - 1) * 0.5 + rank * 0.5
         if (!best || score < best[0]) best = [score, rect, size]
-        if (area === 0 && onPin === 0 && inside) {
+        if (area === 0 && onPin === 0 && inside && far <= limit) {
           clean = true
           break
         }

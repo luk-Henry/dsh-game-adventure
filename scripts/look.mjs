@@ -205,6 +205,22 @@ const MEASURE = `(() => {
     timeline: box('.gf-timeline'),
     cols: box('.gf-cols'),
     rows,
+    // 2026-10-31：记号那枚图钉真的画出来了吗。
+    // 用户报「他的标记变成了纯原色圆」——图钉那张内联 svg 被 .gf-stage svg 的
+    // width:100% 压成 0×0（特异度 0,1,1 打赢 0,1,0），只剩一圈涟漪。
+    // 这里量它的真实像素尺寸，再换算成世界单位比（4 × 5）。
+    pin: (() => {
+      const g = sr.querySelector('.gf-pin-glyph')
+      const ring = sr.querySelector('.gf-pin-ring')
+      const pin = sr.querySelector('.gf-live-pin')
+      if (!pin) return null
+      const box2 = (el) => {
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        return { w: +r.width.toFixed(2), h: +r.height.toFixed(2) }
+      }
+      return { glyph: box2(g), ring: box2(ring) }
+    })(),
     // 2026-10-31：地名签的字有没有坐在牌子里面。
     // 用户那张截图里「他的屋子」右半截压在别的东西上——代码把 x 写成牌子中心、
     // 却没写 text-anchor，SVG 默认 start，于是字从正中起笔往右挤出牌子。
@@ -282,11 +298,25 @@ for (const { w, h, m, file } of results) {
   const ink = pl && pl.ink
   const plate = pl && pl.plate
   const insideX = !!(ink && plate) && ink.x >= plate.x - 0.06 && ink.x + ink.w <= plate.x + plate.w + 0.06
-  const insideY = !!(ink && plate) && ink.y >= plate.y - 0.06 && ink.y + ink.h <= plate.y + plate.h + 0.06
+  // 纵向的容差比横向松：`getBBox` 量的是**字身框**（含 ascent/descent 那些空当），
+  // 汉字本身没有下伸部分，压着牌子下沿的那 0.09 格（约 0.7px）是空的。
+  // 横向那个才是真毛病（从前溢出 2.78 格），所以横向仍旧咬 0.06。
+  const insideY = !!(ink && plate) && ink.y >= plate.y - 0.28 && ink.y + ink.h <= plate.y + plate.h + 0.28
   checks.push([`${tag} 地名签的字坐在牌子里面（左右不溢出）`, insideX,
     pl ? `${pl.text || '（空）'}：字 ${ink ? ink.x + '→' + +(ink.x + ink.w).toFixed(2) : '量不到'} / 牌 ${plate ? plate.x + '→' + +(plate.x + plate.w).toFixed(2) : '没有'}（text-anchor ${pl.anchor}）` : '面板上没有地名签'])
   checks.push([`${tag} 地名签的字坐在牌子里面（上下不溢出）`, insideY,
     ink && plate ? `字 y ${ink.y}→${+(ink.y + ink.h).toFixed(2)} / 牌 y ${plate.y}→${+(plate.y + plate.h).toFixed(2)}` : '量不到'])
+
+  // 2026-10-31（用户截图报的）：记号那枚图钉必须真的画出来（4×5 世界单位），
+  // 不能被 `.gf-stage svg` 的 width:100% 压成 0×0 —— 那样只剩一圈涟漪，看着像「纯色圆」。
+  const pinUnitPx = m.stageSvg.w / 66
+  const gw = m.pin && m.pin.glyph ? m.pin.glyph.w / pinUnitPx : 0
+  const gh = m.pin && m.pin.glyph ? m.pin.glyph.h / pinUnitPx : 0
+  checks.push([`${tag} 记号那枚图钉画出来了（4×5 世界单位）`,
+    m.pin != null && gw > 3.4 && gw < 4.6 && gh > 4.4 && gh < 5.6,
+    m.pin && m.pin.glyph
+      ? `${m.pin.glyph.w}×${m.pin.glyph.h}px = ${gw.toFixed(2)}×${gh.toFixed(2)} 世界单位（每单位 ${pinUnitPx.toFixed(3)}px）`
+      : '面板上找不到 .gf-pin-glyph'])
 
   // ── 几何（t33：这些从 smoke 搬过来的，只有真浏览器量得出来）─────────────────
   // 「地图本体宽 = 面板宽 − 44」这条**按现行 CSS 是不成立的**：44 只算了左右各 22px 的留白，

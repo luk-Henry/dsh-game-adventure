@@ -6538,25 +6538,45 @@ if (HAVE_MAP_FIXTURE) {
     && Math.abs(Number(txEl.getAttribute('y')) - (Number(bgEl.getAttribute('y')) + gotFs * 1.37)) <= 0.06,
     bgEl && `${txEl.textContent} ${bgEl.getAttribute('width')}×${bgEl.getAttribute('height')} fs=${gotFs} 期望 ${wantAt[2] - wantAt[0]}×${wantAt[3] - wantAt[1]}（样签 ${wantW}×${wantH}）`)
 
-  // ② 十三枚签压在图上字/记号上的枚数（M-4：改前 10 枚，改后 2 枚；t24 不许变多）。
-  let pressed = 0
-  const pressedNames = []
+  // ② 地名签的落点（2026-10-31 改口径）。
+  //
+  // 原来的判据是「压住图上字与记号的枚数 ≤ 2」（M-4 / t24）——那时签子的毛病是
+  // 太大、太不透明，压住别人的字看着像坏了。可这一轮用户报的是**另一头**：
+  // 「他的屋子」那枚签落到了**离记号 16 格**的地方，而它存在的全部意义就是指出他在哪。
+  // 签离记号十几格，等于没有签。
+  //
+  // 所以判据换成三件事，按重要性排：
+  //   · 每一枚都贴着记号（≤ 9 格）——**新加的主判据**；
+  //   · 没有一块地图牌子被别人盖掉超过 35%（改前最狠那块盖到 63%，字基本没了）；
+  //   · 压住的总面积别失控（≤ 10 平方世界单位）。
+  // 配套：签字底板从 0.72 提到 0.9，压住的那点字透不上来——这两件事是连着的。
+  let worstDist = 0
+  let worstDistName = ''
+  let worstCover = 0
+  let worstCoverName = ''
+  let pressedArea = 0
   for (const key of Object.keys(MAP_PLACES)) {
     const one = MAP_PLACES[key]
     const rect = mapWorld.placeLabel(one.door[0], one.door[1], one.name.adventure, mapWorld.PLACE_FS, view)
-    let hit = false
+    const dist = Math.hypot((rect[0] + rect[2]) / 2 - one.door[0], (rect[1] + rect[3]) / 2 - one.door[1])
+    if (dist > worstDist) { worstDist = dist; worstDistName = one.name.adventure }
     for (const b of mapWorld.textBoxes()) {
       const ox = Math.min(rect[2], b[4]) - Math.max(rect[0], b[2])
       const oy = Math.min(rect[3], b[5]) - Math.max(rect[1], b[3])
-      if (ox > 0.05 && oy > 0.05) hit = true
-    }
-    if (hit) {
-      pressed++
-      pressedNames.push(one.name.adventure)
+      if (ox > 0.05 && oy > 0.05) {
+        const o = ox * oy
+        pressedArea += o
+        const own = (b[4] - b[2]) * (b[5] - b[3])
+        const cover = own > 0 ? o / own : 0
+        if (cover > worstCover) { worstCover = cover; worstCoverName = b[0] }
+      }
     }
   }
-  check('十三枚地名签几乎不压图上已有的字与记号（M-4：≤2，t24 不许变多）', pressed <= 2,
-    `${pressed}/13${pressedNames.length ? '：' + pressedNames.join(' ') : ''}`)
+  check('十三枚地名签都贴着记号（≤ 9 格；改前最远 16 格）', worstDist <= 9,
+    `最远 ${worstDist.toFixed(2)} 格：${worstDistName}`)
+  check('没有一块地图牌子被地名签盖掉超过 35%', worstCover <= 0.35,
+    `最狠 ${(worstCover * 100).toFixed(0)}%：${worstCoverName}｜压住总面积 ${pressedArea.toFixed(2)}`)
+  check('地名签压住的总面积不失控（≤ 10 平方世界单位）', pressedArea <= 10, pressedArea.toFixed(2))
 
   // ③ 六处野地都有记号（M-5：改前只有「奇观」八处，野地一枚也没有）。
   const wildKeys = ['ruin', 'frost', 'mine', 'quench', 'tower', 'watch']
