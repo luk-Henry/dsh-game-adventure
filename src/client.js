@@ -8125,7 +8125,13 @@ function forksFor(units, seq, choices = null, now = null, canPick = false, pin =
       if (typeof hold.clear === 'function') hold.clear()
       else hold.value = null
     }
-    const pending = canPick && !picked && unit.from === todayFrom
+    // 2026-10-31（用户第二次报：「不是命运吗？我并没有选择，为什么命运消失了。」）：
+    // 「等不等你」从前看 `canPick`（它认「今天开过场」那条账）。可那条账会跟着宿主的存档
+    // 一起变（`dayStart` 一旦读成 0，`canPick` 就塌了），于是**没挑的命运会自己消失、剧情往下走**——
+    // 正是用户说的「我并没有选择，为什么命运消失了」。
+    // 现在：只要存储里还钉着这一件、而且他没挑过，它就一直是 pending，不看 `canPick`。
+    // 钉住的钉子只有两个去处：他挑完了（`hold.clear()`），或者这一天翻过去。
+    const pending = (canPick || !!pinned) && !picked && unit.from === todayFrom
     if (pending) {
       // 停在**它压下来那一刻**——那一刻就是「当下」：第一次看见它的时候，屏幕上最新那一行
       // （用户 m18547 第 1 条）。钉住之后不重算、不跟着时钟漂（第 2 条；用户 m17334：
