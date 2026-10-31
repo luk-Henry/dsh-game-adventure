@@ -8571,7 +8571,7 @@ function clashOf(unit, picked) {
  * 于是序曲与「隔了一夜」按老规矩从记录里自己数——自检里那些夹具正是这么喂的。
  */
 function readStore(next) {
-  if (Array.isArray(next)) return { records: next, since: 0, seam: null, dayStart: 0 }
+  if (Array.isArray(next)) return { records: next, since: 0, seam: null, dayStart: 0, enabled: true }
   const records = next && Array.isArray(next.records) ? next.records : []
   const seam = next && next.seam && Number(next.seam.startedAt) ? next.seam : null
   return {
@@ -8581,6 +8581,10 @@ function readStore(next) {
     // 8 → 9：按下「开始冒险」那一刻（用户 m04200）。没按过 / 老存档是 0，
     // 那时退回「今天零点」的老规矩（见 renderTimeline）。
     dayStart: Number(next && next.dayStart) || 0,
+    // 2026-11-01（用户：「给我一个开关，让我随时可以打开或者完全关闭」）：
+    // 宿主那边有一枚 `~/.dsh/gameflow/off` 标记；在不在就是开没开。
+    // 宿主不在场（自检垫片、预览页、老版本）一律当「开着」。
+    enabled: !(next && next.enabled === false),
   }
 }
 
@@ -10270,6 +10274,34 @@ let liveSettleTimer = 0
   let inputWasKeyboard = false
 
   /**
+   * 开关（2026-11-01，用户：「给我一个开关，让我随时可以打开或者完全关闭」）。
+   *
+   * 真相在宿主那边：`~/.dsh/gameflow/off` 这枚标记在不在。在 = 关着。
+   * 关着的时候**把这扇门整个从页面上摘掉**（不是压暗、不是藏起面板——连那 64×64 都不在），
+   * 同时那天也不再记录（宿主那边同样读这枚标记，见 src/index.js 的 offNow）。
+   *
+   * 想再打开：双击桌面上那个「门后 开关」快捷方式。它只翻这枚标记，**不碰 profile、
+   * 不用重启 DSH**，最多 15 秒生效（门在的时候每 15 秒问一次宿主）。
+   */
+  function setEnabled(on) {
+    if (enabledNow === on) return
+    enabledNow = on
+    if (on) {
+      host.style.display = ''
+      return
+    }
+    if (isOpen) setOpen(false)
+    host.style.display = 'none'
+  }
+  let enabledNow = true
+
+  /** 问一声宿主现在开着没有（`refresh` 每五分钟一次，开关要更快，所以另有 15 秒的轮询）。 */
+  async function probeEnabled() {
+    const next = await fetchStore()
+    if (next) setEnabled(next.enabled !== false)
+  }
+
+  /**
    * 面板收着的时候重算门上那枚记号——**它不自己算，它照见闻录那台机器真画一遍、读它的数**。
    *
    * 用户 m04298 第 2 条把这件事定成一条规矩：
@@ -10382,6 +10414,8 @@ let liveSettleTimer = 0
       onStart: pressStart,
     }
     entries = store.records
+    // 2026-11-01：开关。宿主说关着，就把整扇门从页面上摘掉（不是压暗——「完全关闭」）。
+    setEnabled(store.enabled !== false)
     const narration = narrationFor(entries, stamp, voiceId)
     // 面板开着的时候每五分钟会自己重排一次（见 tickClock）。重排别把用户滚到的地方弹回顶上。
     const keepScroll = Number(timeline.scrollTop) || 0
@@ -11067,6 +11101,11 @@ let liveSettleTimer = 0
     mounted = true
     applyTheme()
     refresh()
+    // 2026-11-01：开关是**在外面**翻的（桌面那个快捷方式只翻 `~/.dsh/gameflow/off`，
+    // 不碰 profile、不用重启 DSH），所以这里得自己去问一声——15 秒一次本地请求，不走网络。
+    if (typeof window !== 'undefined' && typeof window.setInterval === 'function') {
+      window.setInterval(() => { void probeEnabled() }, 15000)
+    }
     // 上次留住了，这次打开也还留住（用户 m11003 第 3 条那个常驻按钮记着）。
     if (readPin(store)) setPinned(true)
     // 钟从挂上就开始走：门关着的时候它只负责那枚提醒记号（见 tickClock）。

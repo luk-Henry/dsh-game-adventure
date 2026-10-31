@@ -56,6 +56,28 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 const STORE_SEGMENTS = ['gameflow', 'records.json']
 
 /**
+ * 开关（2026-11-01，用户：「给我一个开关，让我随时可以打开或者完全关闭」）。
+ *
+ * 这枚标记在 = **关着**：不记录、界面那边把整扇门摘掉。
+ * 它故意做成「一个空文件」，因为翻它的那个人不是我们——是桌面上那个快捷方式
+ * （`scripts/game-onoff.mjs`），它只 `writeFile` / `rm` 这一个文件，**不碰 profile、
+ * 不用重启 DSH**，插件这边最多 15 秒就跟着变。
+ *
+ * 跟 `measure.on` 同一个脾气：文件在就是开，简单到不可能出错。
+ */
+const OFF_SEGMENTS = ['gameflow', 'off']
+
+/** 现在关着吗？读不到（文件不在）就是开着。 */
+async function offNow() {
+  try {
+    await stat(join(resolveDshHome(), ...OFF_SEGMENTS))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * 「量尺寸」是给**改版面**用的开发钩子，不是插件功能。
  *
  * 浏览器那半边把面板上每一块的位置、字号、颜色量下来，连同地图 SVG 一起交回来，
@@ -1134,6 +1156,8 @@ function apply(ctx) {
     dirty = false
     writing = writing
       .then(async () => {
+        // 2026-11-01（开关）：关着的时候一律不落盘——「完全关闭」是连记录都不再长。
+        if (await offNow()) return
         const store = await readStore(file, warn)
         // 读不动就别写：宁可这一轮不落盘，也不能把读不出来的记录覆盖成空的。
         if (store.blocked) throw new Error(`存档读不动，这一轮不落盘：${file}`)
@@ -1329,6 +1353,8 @@ function apply(ctx) {
         // 8 → 9：他按下「开始冒险」那一刻（见 startDay）。界面据此决定今天铺不铺、
         // 从哪一格起铺——没有它（没按过、老存档）就退回「今天零点」的老规矩。
         dayStart: pruned.dayStart,
+        // 2026-11-01：开关。界面据此把整扇门摘掉 / 挂回来（见 client 的 setEnabled）。
+        enabled: !(await offNow()),
       })
       res.writeHead(200, {
         'content-type': 'application/json; charset=utf-8',
