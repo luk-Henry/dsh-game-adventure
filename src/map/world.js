@@ -580,20 +580,14 @@ export function nations(mode = 'tier1') {
     // （二级国的）连国名都没有——图上那九座城像是凭空多的。小一号写就是了。
     const fs = NATION_FS[tier]
     const cs = NATION_CS[tier]
-    const [r0, r1, r2, r3] = plate_rect(cx, cy, name, fs)
-    // **徽记摆在底板里面**，不是浮在底板外面。原来浮在外面，靠左的国
-    // （西岸自由城邦、巨人之脊）那面盾有一半被画框切掉；放进底板之后，
-    // 夹取一次就够了，而且「盾 + 名字」读成一块牌子，不是两个东西。
-    const x0 = r0 - cs * 0.94
-    const w = (r2 - r0) + cs * 0.94
+    const { slot, t, w } = nationMetrics(name, tier)
+    const [x0, r1, , r3] = nationBox(cx, cy, name, tier)
     const op = tier === 1 ? '0.84' : '0.72'
     o.push(`<rect x="${f2(x0)}" y="${f2(r1)}" width="${f2(w)}" height="${f2(r3 - r1)}" rx="0.16" fill="#EFE7D3" opacity="${op}"/>`)
-    o.push(...crest(x0 + cs * 0.60, cy, cs, race, color))
-    // 2026-10-31（用户报「名字在方框里没居中，对比前面的徽记更没对齐」）：
-    // 底板左边被徽记占掉 `cs * 0.94`，字却还钉在祖国的中心 `cx` 上，
-    // 于是左空当比右空当多出整整那一段（实测 1.53 对 0.41，差 1.1 格 ≈ 8px）。
-    // 把字左移半个徽记宽，两边空当就相等——底板本身一个字都不用动。
-    const tx = cx - cs * 0.47
+    // 徽记摆在它那一槽的正中
+    o.push(...crest(x0 + NATION_PAD + slot / 2, cy, cs, race, color))
+    // 名字摆在「徽记槽 + 缝」右边那一段的正中——两边留白相等，且不会碰到徽记
+    const tx = x0 + NATION_PAD + slot + NATION_INNER + t / 2
     o.push(`<text x="${f2(tx)}" y="${f2(plate_text_y(cy, fs))}" font-size="${f2(fs)}" fill="${tier === 1 ? '#3B2E20' : '#5A4A34'}" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06">${name}</text>`)
   }
   // 城名比国名小一号压在都城记号下面；落点由 `cityPlates()` 统一算（跟 `_boxes()` 同一份）。
@@ -801,9 +795,33 @@ function cityShifts() {
 let _NATION_PLATES = null
 let _NATION_SKIPS = null
 
+/**
+ * 一块国名牌的版面：`[留白][徽记][缝][名字][留白]`，两边留白相等。
+ *
+ * 2026-10-31（用户连报两轮）：先是「名字在方框里没居中、跟前面的图标对不齐」，
+ * 我把字往左挪——结果「图标和名字的首字重叠了」。两个毛病是同一个根：
+ * 底板的宽是按**纯文字**算出来的，徽记是事后在左边「外挂」上去的，
+ * 于是底板里根本没有徽记的位置，字怎么挪都是错的。
+ *
+ * 现在底板宽度由四段加起来：`2 × 留白 + 徽记槽 + 缝 + 文字宽`，
+ * 徽记摆在槽中间、字摆在剩余区的中间——不会重叠，两边留白也一样宽。
+ */
+const NATION_PAD = 0.40
+const NATION_INNER = 0.32
+const CREST_W_RATIO = 0.88
+
+function nationMetrics(name, tier) {
+  const fs = NATION_FS[tier]
+  const cs = NATION_CS[tier]
+  const n = nlen(name)
+  const t = n * fs + Math.max(0, n - 1) * 0.06 // 字宽（含 letter-spacing）
+  const slot = cs * CREST_W_RATIO
+  return { fs, cs, slot, t, w: 2 * NATION_PAD + slot + NATION_INNER + t, h: fs * 1.62 }
+}
+
 function nationBox(cx, cy, name, tier) {
-  const [r0, r1, r2, r3] = plate_rect(cx, cy, name, NATION_FS[tier])
-  return [r0 - NATION_CS[tier] * 0.94, r1, r2, r3]
+  const { fs, w, h } = nationMetrics(name, tier)
+  return [cx - w / 2, cy - fs * 0.95, cx + w / 2, cy - fs * 0.95 + h]
 }
 
 /** 二十块国名牌的落点（算一次；`nations()`、`_baseBoxes()`、面板避让共用）。
@@ -824,7 +842,7 @@ export function nationPlates() {
     const row = NATIONS[i]
     const [name, race, land, color, seeds, [nx, ny], [cname, , , tier]] = row
     const [q0, , q2] = plate_rect(0, 0, name, NATION_FS[tier])
-    const half = (q2 - q0) / 2 + NATION_CS[tier] * 0.47
+    const half = nationMetrics(name, tier).w / 2 + 0.1
     const look = (shifts) => {
       let found = null
       for (const [dx, dy] of shifts) {

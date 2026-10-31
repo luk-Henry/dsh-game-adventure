@@ -230,14 +230,25 @@ const MEASURE = `(() => {
         if (!mapSvgEl) return { err: '找不到地图 svg' }
         const out = []
         let plate = null
+        let crestX = null
         const bbox = (el) => { try { return el.getBBox() } catch { return null } }
         for (const el of mapSvgEl.querySelectorAll('rect, text, path')) {
           const tag = el.tagName.toLowerCase()
           if (tag === 'rect' && el.getAttribute('rx') && !el.closest('pattern')) {
             plate = bbox(el)
+            crestX = null
             continue
           }
-          if (tag !== 'text' || !plate) continue
+          if (!plate) continue
+          if (tag === 'path') {
+            // 徽记：夹在底板与名字之间的那些 path，取最靠左的那个当外边界
+            const c = bbox(el)
+            if (c && c.width > 0 && c.height > 0 && c.height <= plate.height + 0.4) {
+              crestX = crestX == null ? c.x : Math.min(crestX, c.x)
+            }
+            continue
+          }
+          if (tag !== 'text') continue
           const t = bbox(el)
           // 海名不上底板（labels() 里 kind === 'sea' 那一支），它的「牌子」是旁边
           // 随便哪块矩形——只要字明显不在这块板里，就不算一块名牌的量法。
@@ -245,13 +256,17 @@ const MEASURE = `(() => {
             && t.x >= plate.x - 0.6 && t.x + t.width <= plate.x + plate.width + 0.6
             && t.y >= plate.y - 0.6 && t.y + t.height <= plate.y + plate.height + 0.6
           if (t && t.width > 0 && inside) {
+            // 外边界：左边是徽记（有的话）的左沿，右边是名字的右沿
+            const outerLeft = (crestX == null ? t.x : crestX) - plate.x
+            const outerRight = (plate.x + plate.width) - (t.x + t.width)
             out.push({
               name: (el.textContent || '').slice(0, 8),
-              dx: +((t.x - plate.x) - ((plate.x + plate.width) - (t.x + t.width))).toFixed(3),
+              dx: +(outerLeft - outerRight).toFixed(3),
               dy: +((t.y - plate.y) - ((plate.y + plate.height) - (t.y + t.height))).toFixed(3),
             })
           }
           plate = null
+          crestX = null
         }
         return out
       } catch (error) { return { err: String(error && error.message ? error.message : error) } }
