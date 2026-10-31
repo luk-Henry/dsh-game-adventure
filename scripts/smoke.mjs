@@ -6535,7 +6535,7 @@ if (HAVE_MAP_FIXTURE) {
   check('面板那枚地名签跟世界图那块牌子用同一条算式（M-14）',
     Boolean(bgEl) && Math.abs(Number(bgEl.getAttribute('width')) - (wantAt[2] - wantAt[0])) <= 0.12
     && Math.abs(Number(bgEl.getAttribute('height')) - (wantAt[3] - wantAt[1])) <= 0.12
-    && Math.abs(Number(txEl.getAttribute('y')) - (Number(bgEl.getAttribute('y')) + gotFs * 1.37)) <= 0.06,
+    && Math.abs(Number(txEl.getAttribute('y')) - (Number(bgEl.getAttribute('y')) + gotFs * 1.23)) <= 0.06,
     bgEl && `${txEl.textContent} ${bgEl.getAttribute('width')}×${bgEl.getAttribute('height')} fs=${gotFs} 期望 ${wantAt[2] - wantAt[0]}×${wantAt[3] - wantAt[1]}（样签 ${wantW}×${wantH}）`)
 
   // ② 地名签的落点（2026-10-31 改口径）。

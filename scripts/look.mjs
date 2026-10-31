@@ -221,6 +221,41 @@ const MEASURE = `(() => {
       }
       return { glyph: box2(g), ring: box2(ring) }
     })(),
+    // 2026-10-31（用户报「每个名字在方框里都没居中，对比前面的徽记更没对齐」）：
+    // 把地图上每一块带底板的牌子都量一遍——牌子矩形 vs 里面那行字的包围盒，
+    // 取左右、上下空当之差。国名那块左边还被徽记吃掉一段，所以国名的差值是关键。
+    plates: (() => {
+      try {
+        const mapSvgEl = sr.querySelector('.gf-stage svg')
+        if (!mapSvgEl) return { err: '找不到地图 svg' }
+        const out = []
+        let plate = null
+        const bbox = (el) => { try { return el.getBBox() } catch { return null } }
+        for (const el of mapSvgEl.querySelectorAll('rect, text, path')) {
+          const tag = el.tagName.toLowerCase()
+          if (tag === 'rect' && el.getAttribute('rx') && !el.closest('pattern')) {
+            plate = bbox(el)
+            continue
+          }
+          if (tag !== 'text' || !plate) continue
+          const t = bbox(el)
+          // 海名不上底板（labels() 里 kind === 'sea' 那一支），它的「牌子」是旁边
+          // 随便哪块矩形——只要字明显不在这块板里，就不算一块名牌的量法。
+          const inside = t
+            && t.x >= plate.x - 0.6 && t.x + t.width <= plate.x + plate.width + 0.6
+            && t.y >= plate.y - 0.6 && t.y + t.height <= plate.y + plate.height + 0.6
+          if (t && t.width > 0 && inside) {
+            out.push({
+              name: (el.textContent || '').slice(0, 8),
+              dx: +((t.x - plate.x) - ((plate.x + plate.width) - (t.x + t.width))).toFixed(3),
+              dy: +((t.y - plate.y) - ((plate.y + plate.height) - (t.y + t.height))).toFixed(3),
+            })
+          }
+          plate = null
+        }
+        return out
+      } catch (error) { return { err: String(error && error.message ? error.message : error) } }
+    })(),
     // 2026-10-31：地名签的字有没有坐在牌子里面。
     // 用户那张截图里「他的屋子」右半截压在别的东西上——代码把 x 写成牌子中心、
     // 却没写 text-anchor，SVG 默认 start，于是字从正中起笔往右挤出牌子。
@@ -312,6 +347,18 @@ for (const { w, h, m, file } of results) {
   const pinUnitPx = m.stageSvg.w / 66
   const gw = m.pin && m.pin.glyph ? m.pin.glyph.w / pinUnitPx : 0
   const gh = m.pin && m.pin.glyph ? m.pin.glyph.h / pinUnitPx : 0
+  // 每一块名牌里的字都要坐在板心。
+  // 改前国名的左右差是 1.1 格（底板左边被徽记吃掉了，字还钉在祖国中心），
+  // 上下差是 0.34 格（字整行贴着下沿）——这两条阈值能把它们当场抓红。
+  const plates = Array.isArray(m.plates) ? m.plates : []
+  const worstDx = plates.reduce((a, p) => (Math.abs(p.dx) > Math.abs(a.dx) ? p : a), { dx: 0, name: '—' })
+  const worstDy = plates.reduce((a, p) => (Math.abs(p.dy) > Math.abs(a.dy) ? p : a), { dy: 0, name: '—' })
+  checks.push([`${tag} 每块名牌里的字都居中（左右差 ≤ 0.2 格、上下差 ≤ 0.08 格）`,
+    plates.length >= 30 && Math.abs(worstDx.dx) <= 0.2 && Math.abs(worstDy.dy) <= 0.08,
+    plates.length
+      ? `${plates.length} 块｜左右最偏 ${worstDx.name} ${worstDx.dx}｜上下最偏 ${worstDy.name} ${worstDy.dy}`
+      : (m.plates && m.plates.err ? `量的时候出错：${m.plates.err}` : '一块牌子都没量到')])
+
   checks.push([`${tag} 记号那枚图钉画出来了（4×5 世界单位）`,
     m.pin != null && gw > 3.4 && gw < 4.6 && gh > 4.4 && gh < 5.6,
     m.pin && m.pin.glyph

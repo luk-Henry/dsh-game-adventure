@@ -589,7 +589,12 @@ export function nations(mode = 'tier1') {
     const op = tier === 1 ? '0.84' : '0.72'
     o.push(`<rect x="${f2(x0)}" y="${f2(r1)}" width="${f2(w)}" height="${f2(r3 - r1)}" rx="0.16" fill="#EFE7D3" opacity="${op}"/>`)
     o.push(...crest(x0 + cs * 0.60, cy, cs, race, color))
-    o.push(`<text x="${f2(cx)}" y="${f2(plate_text_y(cy, fs))}" font-size="${f2(fs)}" fill="${tier === 1 ? '#3B2E20' : '#5A4A34'}" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06">${name}</text>`)
+    // 2026-10-31（用户报「名字在方框里没居中，对比前面的徽记更没对齐」）：
+    // 底板左边被徽记占掉 `cs * 0.94`，字却还钉在祖国的中心 `cx` 上，
+    // 于是左空当比右空当多出整整那一段（实测 1.53 对 0.41，差 1.1 格 ≈ 8px）。
+    // 把字左移半个徽记宽，两边空当就相等——底板本身一个字都不用动。
+    const tx = cx - cs * 0.47
+    o.push(`<text x="${f2(tx)}" y="${f2(plate_text_y(cy, fs))}" font-size="${f2(fs)}" fill="${tier === 1 ? '#3B2E20' : '#5A4A34'}" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06">${name}</text>`)
   }
   // 城名比国名小一号压在都城记号下面；落点由 `cityPlates()` 统一算（跟 `_boxes()` 同一份）。
   for (const [cname, px, py, cfs] of cityPlates()) {
@@ -615,7 +620,9 @@ export function labels() {
     if (!rect) continue
     const [r0, r1, r2, r3] = rect
     const px = (r0 + r2) / 2
-    const ty = r1 + fs * 1.37
+    // 2026-10-31：跟 `plate_text_y` 同一件事——原来落 1.37，字身框上边留 0.401、
+    // 下边只剩 0.03，整行贴着底板下沿。上移 0.14fs 落到 1.23，两边空当取中。
+    const ty = r1 + fs * 1.23
     if (kind === 'sea') {
       o.push(`<text x="${f2(px)}" y="${f2(ty)}" font-size="${f2(fs)}" fill="#8FB0BC" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06" opacity="0.92">${name}</text>`)
     } else {

@@ -7401,7 +7401,9 @@ export function renderStage(stage, narration, voice = DEFAULT_VOICE, fromPlace =
         stage.labelBg.setAttribute('height', (rect[3] - rect[1]).toFixed(1))
         stage.labelText.setAttribute('x', ((rect[0] + rect[2]) / 2).toFixed(1))
         stage.labelText.setAttribute('font-size', size.toFixed(2))
-        stage.labelText.setAttribute('y', (y + size * 1.37).toFixed(1))
+        // 2026-10-31：跟 `plate_text_y` 一起正过来（0.42→0.28 的同一笔）。
+        // 原来落 1.37，字贴着底板下沿；落 1.23 两边空当才相等。
+        stage.labelText.setAttribute('y', (y + size * 1.23).toFixed(1))
         stage.labelText.textContent = name
       }
     }
