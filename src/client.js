@@ -7731,6 +7731,42 @@ function writeChoices(store, choices) {
   } catch { /* 记不住就算了，这一次照样按你挑的显示 */ }
 }
 
+/**
+ * 「命运压下来那一刻」那枚钉子，也落一份在本地（2026-10-31，用户报「命运变了」）。
+ *
+ * 原来它只活在内存里（`forkPin = { value: null }`），DSH 一重启就没了；而「哪一件压下来」
+ * 是拿**当下这一整天的账**判的（`rulesForkOf`），账一直在长，于是重启之后重算会换人——
+ * 用户眼睁睁看着它从「先搬那箱名册 / 先撬那根梁」变成「横到路当中 / 先看清来路」，
+ * 而这时候他一个字都还没挑。**没挑之前，压下来的那一件必须钉死。**
+ *
+ * 存的只有三个数：哪一天（`day`）、哪一件（`id`）、压在哪个时刻（`at`）。
+ * 记录里一个字都不写——跟挑法一样，是界面这边的事。
+ */
+const FORK_PIN_STORE_KEY = 'dsh.gameflow.forkpin'
+
+function readForkPin(store) {
+  if (!store || typeof store.getItem !== 'function') return null
+  try {
+    const raw = store.getItem(FORK_PIN_STORE_KEY)
+    const data = raw ? JSON.parse(raw) : null
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+    const day = Number(data.day)
+    const at = Number(data.at)
+    if (!Number.isFinite(day) || !Number.isFinite(at) || typeof data.id !== 'string' || !data.id) return null
+    return { day, id: data.id, at }
+  } catch {
+    return null
+  }
+}
+
+function writeForkPin(store, pin) {
+  if (!store || typeof store.setItem !== 'function') return
+  try {
+    if (!pin) store.removeItem(FORK_PIN_STORE_KEY)
+    else store.setItem(FORK_PIN_STORE_KEY, JSON.stringify({ day: pin.day, id: pin.id, at: pin.at }))
+  } catch { /* 记不住就算了，这一次照样按钉住的显示 */ }
+}
+
 /** 「哪一天 + 哪件事」——挑的那条就封在这个键上。 */
 function choiceKey(entry, moment) {
   return `${(entry && entry.id) || ''}|${(moment && moment.id) || ''}`
@@ -8054,6 +8090,9 @@ function forksFor(units, seq, choices = null, now = null, canPick = false, pin =
   // 没给钉子就自己造一枚：`forksFor` 是内部函数，敢直接调它的地方（自检、预览页）不该拿到
   // 半路崩掉的结果——只是那一枚钉子活不过这一次调用，跟从前「模块级」的区别正是我们要的。
   const hold = pin || { value: null }
+  // DSH 重启之后 `value` 是空的——先把落盘的那一枚捞回来（见 `readForkPin` 的头注）：
+  // 没挑之前，压下来的那一件不许跟着当天长出来的账换人。
+  if (!hold.value && typeof hold.load === 'function') hold.value = hold.load()
   const out = new Map()
   const result = { map: out, live: null, death: null }
   const table = Array.isArray(FORKS) ? FORKS : []
@@ -8081,7 +8120,11 @@ function forksFor(units, seq, choices = null, now = null, canPick = false, pin =
     const roads = Array.isArray(fork.roads) ? fork.roads : []
     if (roads.length < 2) continue
     const picked = pickedForkRoad(fork, unit.entry, choices)
-    if (picked && hold.value && hold.value.id === fork.id) hold.value = null
+    if (picked && hold.value && hold.value.id === fork.id) {
+      // 挑过了：钉子连同落盘那一份一起拔掉，这一天后面再压下来的由机器自己判。
+      if (typeof hold.clear === 'function') hold.clear()
+      else hold.value = null
+    }
     const pending = canPick && !picked && unit.from === todayFrom
     if (pending) {
       // 停在**它压下来那一刻**——那一刻就是「当下」：第一次看见它的时候，屏幕上最新那一行
@@ -8090,6 +8133,8 @@ function forksFor(units, seq, choices = null, now = null, canPick = false, pin =
       const at = hold.value && hold.value.id === fork.id
         ? hold.value.at
         : (hold.value = { day: Number(unit.from), id: fork.id, at: Number(rows[rows.length - 1].at) }).at
+      // 第一次看见它就把钉子落盘：DSH 重启之后还得是这一件、还得停在这一刻。
+      if (typeof hold.save === 'function') hold.save(hold.value)
       // 那一刻落在哪一行上：今天**不晚于它**的最新那一行（格或日卷）。
       // 这里**不许留 `null`**——`Number(null)` 是 `0`，会把整条梯子滤空（2026-10-10 撞过一次）。
       const on = units
@@ -9451,7 +9496,20 @@ export function createGameflow(options = {}) {
   let archive = { since: 0, seam: null, dayStart: 0, dayStartKnown: false }
   // 命运「压下来那一刻」那枚钉子（见 `forksFor` 的头注）：**一个实例一枚**，从前它是
   // 模块级的 `pendingPin`，同一个页面上两块面板会互相拽（报告里那条设计债）。
-  const forkPin = { value: null }
+  const forkPin = {
+    value: null,
+    // 落盘的那一份（见 `readForkPin` 的头注）：DSH 重启之后要能把它捞回来。
+    load() {
+      return picks.canSave ? readForkPin(store) : null
+    },
+    save(pin) {
+      if (picks.canSave) writeForkPin(store, pin)
+    },
+    clear() {
+      forkPin.value = null
+      if (picks.canSave) writeForkPin(store, null)
+    },
+  }
   // 岔口挑过的那些（2026-10-08 晚加的，用户 m10670 第 2 条：「我要的交互选项在哪？」）。
   // 跟挑说法**同一个存储、另一个键**：挑的是「哪一天、哪件事、走哪条路」，记在本地，
   // **不写 `records.json`**——记录里仍然只有他真做的事（这是这个插件的底线）。

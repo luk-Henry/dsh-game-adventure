@@ -4676,6 +4676,45 @@ check('命运：折叠状态动不了它——同一份记录晚看 45 分钟，
     === pickBtns.map((e) => e.getAttribute('data-road')).join(' '),
   `${rolledHost.all('gf-choice-live').length} 处 / ${rolledBtns.map((e) => e.getAttribute('data-road')).join(' ') || '一颗都没有'}`)
 
+// 2026-10-31（用户报「命运变了」）：钉子必须落盘。
+// 原来 `forkPin` 只活在内存里，DSH 一重启就重算；而「哪一件压下来」是拿**当天一直在长的账**
+// 判的（`rulesForkOf`），于是没挑之前它就能换人——用户眼睁睁看着它从
+// 「先搬那箱名册 / 先撬那根梁」变成「横到路当中 / 先看清来路」，一个字都还没挑。
+const pinnedStored = (() => {
+  try {
+    return JSON.parse(rolledStore.getItem('dsh.gameflow.forkpin'))
+  } catch {
+    return null
+  }
+})()
+check('命运：压下来那一刻落进了本地（重启也换不了件）',
+  !!pinnedStored && typeof pinnedStored.id === 'string' && pinnedStored.id.length > 0
+  && Number.isFinite(Number(pinnedStored.day)) && Number.isFinite(Number(pinnedStored.at)),
+  pinnedStored ? `${pinnedStored.id} @ ${pinnedStored.at}` : '没落盘')
+
+// 有牙：把**另一件**命运的 id 钉进存储（模拟「今天早些时候就压下来了」），
+// 面板必须照它摆——而不是照当天这份账重算出来的那一件。这一条才是「重启不换件」的真证据：
+// 重启之后走的正是这条路（`forkPin.load()` 捞回存储里的 id，`forksFor` 里 `pinned` 优先）。
+const plantedStore = freshStore()
+const plantedDay = (() => {
+  const d = new Date(NOW)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+})()
+plantedStore.setItem('dsh.gameflow.forkpin', JSON.stringify({ day: plantedDay, id: 'meet', at: NOW }))
+const plantedGf = createGameflow({ loadRecords: () => PICK_DAYS, now: () => NOW, storage: plantedStore })
+plantedGf.mount()
+plantedGf.open()
+await tick()
+const plantedHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const plantedBtns = plantedHost.all('gf-choice-pick')
+const plantedWant = meetFork.roads.map((r) => r.id).join(' ')
+check('命运：存储里钉着哪一件，面板就摆哪一件（重启走的就是这条路）',
+  plantedBtns.length === 2
+  && plantedBtns.map((e) => e.getAttribute('data-road')).join(' ') === plantedWant,
+  `摆了 ${plantedBtns.map((e) => e.getAttribute('data-road')).join(' ') || '一颗都没有'}`
+  + ` ／ 钉的是 ${plantedWant}（重算本来会给 ${pickBtns.map((e) => e.getAttribute('data-road')).join(' ')}）`)
+
 // 没定下来之前，「他的冒险」（右栏）一概不进这一遍（用户 m18547 第 2 条逐字：「在用户没有进行命运
 // 选择的时候，界面要一直停在命运选择上，并且不再有任何落盘的进程和发展，必须等用户选择之后，再
 // 开始发展。」）。2026-10-18 用户 m18735 又补了一条：「停的只是右侧"他的冒险"，左侧是用户的
