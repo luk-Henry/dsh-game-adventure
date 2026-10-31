@@ -32,6 +32,9 @@ import { choiceOf as rulesChoiceOf, dangerOf as rulesDangerOf, directionOf as ru
 // `focusAt` 是「这个世界坐标属于哪座城」，`LF_CSS` 是地方图那一条 `.lf`（田里的犁沟）——
 // 它住在 `LOCAL_CSS` 里，面板得自己接上，不然镜内犁沟一条都不画。
 import { build_local, focusAt, LF_CSS } from './map/local.js'
+// 地名签往哪儿摆：跟地图自己那块牌子用**同一条算式**（`plate_rect`），
+// 并且要躲开图上已有的字与记号（2026-10-30 地图审计 M-4/M-14）。
+import { placeLabel, PLACE_FS } from './map/world.js'
 // 地图那边的数字格式化（Python `'{:.2f}'.format` 的等值版）——`toFixed` 在恰好一半时
 // 的进位方向跟 Python 不一样，取景框的补间要用同一套。
 import { f2 } from './map/geo.js'
@@ -294,6 +297,24 @@ export const THEMES = {
       '--gf-tag-bg': 'transparent',
       '--gf-tag-fg': '#D9A79C',
       '--gf-tag-radius': '2px',
+      /* 界面审计 U1/U7/U8：这一套从前**少定义**了几枚 token，于是它们静静落到兜底值上——
+         地名的字色落回 `--gf-fg`（浅奶油压浅纸，1.16:1，整枚签读不出来）、
+         小标题与表头落回 `--gf-fg-dim`（一片统一的灰，没有金色层次）、
+         地名签的细边与地图的凹槽干脆 `none`。补上，值都按这一套的纸与印来配：
+         地名字用 `src/map/local.js` 题名框那个同一个墨色（纸上的字是墨，不是奶油）。 */
+      '--gf-place-fg': '#3B2E20',
+      '--gf-k-fg': '#C9A96A',
+      '--gf-head-fg': '#B79E78',
+      '--gf-week-fg': '#B79E78',
+      '--gf-glow': '0',
+      '--gf-num-font': 'ui-monospace, "SFMono-Regular", Menlo, Consolas, "Courier New", monospace',
+      '--gf-room-line': 'rgba(158, 59, 50, 0.26)',
+      '--gf-stage-shadow': 'inset 0 0 0 1px rgba(120, 96, 56, 0.30), inset 0 2px 10px rgba(0, 0, 0, 0.26)',
+      /* 木纹、门的滤镜这一套维持 none——古籍图书馆的材质是纸与绢，不是木头。
+         这是**故意**的，不是漏项（审计 U8 的提醒）；写成显式的 none，好让
+         「某套主题少一个变量」这种洞以后在自检里一眼看得出来。 */
+      '--gf-grain': 'none',
+      '--gf-door-filter': 'none',
       '--gf-seal': '#9E3B32',
       '--gf-spine': 'rgba(44, 58, 85, 0.85)',
       '--gf-shadow': '0 10px 34px rgba(0, 0, 0, 0.5)',
@@ -431,9 +452,16 @@ const CSS = `
    圆心跟着记号走）。两级**都吃这一套**，而且吃的是**同一条世界坐标的渐变**：
    细节版是换 viewBox 换出来的，地方图那层的坐标系就是世界坐标，直接铺就对齐。
    （第四十三～四十七版那套「按镜子的映射倒推」的第二条渐变，在两级地图里整个删了。） */
-#gf-world .mnight { fill: url(#gf-night); opacity: calc(var(--gf-dusk,0) * 0.45); }
-#gf-zoom .mnight { fill: url(#gf-night); opacity: calc(var(--gf-dusk,0) * 0.45); }
-.gf-map.gf-zoom-local .mnight { fill: url(#gf-night); opacity: calc(var(--gf-dusk,0) * 0.45); }
+#gf-world .mnight { fill: url(#gf-night); opacity: calc(var(--gf-dusk,0) * 0.52); }
+#gf-zoom .mnight { fill: url(#gf-night); opacity: calc(var(--gf-dusk,0) * 0.52); }
+.gf-map.gf-zoom-local .mnight { fill: url(#gf-night); opacity: calc(var(--gf-dusk,0) * 0.52); }
+/* 界面审计 U16：--gf-dusk 是每 30 秒按钟点现算的，从前它一改，夜罩就**硬跳**一格
+   （天说黑就黑，像被人拽了一下）。给 opacity 一条 1.6s 的过渡，让黄昏是漫上来的。
+   单列一条规则是有意的：上面那三行据说是「夜罩的凭据」（smoke 有两条断言逐字比它们），
+   别把过渡写进去搅浑。只过渡 opacity——fill 是同一支世界坐标渐变，不动。 */
+#gf-world .mnight,
+#gf-zoom .mnight,
+.gf-map.gf-zoom-local .mnight { transition: opacity 1.6s ease; }
 #gf-night stop { stop-color: var(--gf-dusk-color, #140D07); }
 
 /* 角落那张小全图（用户 m19416 定的第四条）：永远看得见自己在哪儿，点一下跳过去。
@@ -446,7 +474,10 @@ const CSS = `
   display: none;
   position: absolute;
   right: 10px;
-  bottom: 10px;
+  /* 小全图原来钉在右下角，正好压住罗盘（地图审计 M-8：罗盘画在世界坐标 62.0, 30.6，
+     也就是整张图的右下角）。挪到右上——那一角是画框边上那片空海，没有记号、没有地名签，
+     压不着东西。 */
+  top: 10px;
   width: 112px;
   height: 58px;
   border: 1px solid rgba(214,178,112,.5);
@@ -487,7 +518,8 @@ const CSS = `
 .gf-back {
   position: absolute;
   right: 10px;
-  bottom: 74px;
+  /* 跟着小全图挪到右上（M-8）：小全图占 10 + 58 高，按钮从它下沿再落 6。 */
+  top: 74px;
   font: inherit;
   font-size: 12px;
   padding: 3px 10px;
@@ -582,7 +614,10 @@ const CSS = `
   font-size: 13.5px;
   letter-spacing: 0.14em;
   color: var(--gf-door-label-fg, var(--gf-fg-dim));
-  opacity: 0;
+  /* 界面审计 U14：从前常态是 opacity: 0，只有 hover/focus 才浮出「门后」二字——
+     新用户第一眼只看见右下角一枚 64px 的木门，不知道那是什么；触屏更是永远没有 hover。
+     常态给它 .55（读得见、不抢），手放上去或键盘聚焦时到 1。 */
+  opacity: 0.55;
   pointer-events: none;
   transition: opacity 200ms ease, transform 200ms ease;
 }
@@ -674,23 +709,28 @@ const CSS = `
   position: absolute;
   right: 8px;
   top: 8px;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   font: inherit;
-  color: var(--gf-door-label-fg, var(--gf-fg-dim));
+  /* 界面审计 U5：从前是 --gf-door-label-fg + opacity .6 → 2.14:1，26px 的方框里
+     一枚 15px 的金图钉，在深木上看起来像一块污渍，谁也不知道那是唯一能钉住面板的开关。
+     改成金（--gf-k-fg，两套主题都定义了），不透明，28px 方框里 18px 的图标，
+     再加一道极淡的外描边把它从地形里「抬」出来。 */
+  color: var(--gf-k-fg, var(--gf-door-label-fg, var(--gf-fg-dim)));
   background: rgba(20, 14, 8, 0.72);
   border: 1px solid rgba(214, 178, 112, 0.35);
   border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
   cursor: pointer;
   pointer-events: auto;
-  opacity: 0.6;
+  opacity: 1;
   transition: opacity 200ms ease, color 200ms ease, border-color 200ms ease, background 200ms ease;
 }
-.gf-always:hover { opacity: 1; background: rgba(40, 28, 16, 0.88); }
+.gf-always:hover { background: rgba(40, 28, 16, 0.92); border-color: var(--gf-k-fg, rgba(214, 178, 112, 0.35)); }
 .gf-always[aria-pressed='true'] {
   opacity: 1;
   /* 用户 m12444 第 3 条：「常驻按钮按了之后也是红色的，这是不对的，不符合我们颜色梯度的，
@@ -701,7 +741,7 @@ const CSS = `
   border-color: var(--gf-door-knob, #E0B96E);
   background: rgba(40, 28, 16, 0.9);
 }
-.gf-stage svg.gf-always-icon { display: block; width: 15px; height: 15px; }
+.gf-stage svg.gf-always-icon { display: block; width: 18px; height: 18px; }
 .gf-pin-filled { display: none; }
 .gf-always[aria-pressed='true'] .gf-pin-filled { display: block; }
 .gf-always[aria-pressed='true'] .gf-pin-outline { display: none; }
@@ -753,14 +793,17 @@ const CSS = `
   transition: opacity 240ms cubic-bezier(0.2, 0.8, 0.3, 1), transform 240ms cubic-bezier(0.2, 0.8, 0.3, 1), visibility 0s;
 }
 /* 2026-10-07 第二层：底下收一道口。一块木板总得有个下沿，
-   不然最下面那一行像是被截断的。 */
+   不然最下面那一行像是被截断的。
+   界面审计 U9：18px 太浅，滚到底时最后一行下面那排标签会被**从中间**横切
+   （四个圆角框只露出上半截，像排版坏了）。30px 让半截元素化得开一些，
+   配合 .gf-timeline 加大的 padding-bottom，切口落在空白里。 */
 .gf-room::after {
   content: '';
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 18px;
+  height: 30px;
   pointer-events: none;
   background: linear-gradient(180deg, transparent, var(--gf-room-foot, transparent) 86%);
   border-bottom: 1px solid var(--gf-room-edge, transparent);
@@ -778,7 +821,7 @@ const CSS = `
   flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0 22px 28px;
+  padding: 0 22px 36px;
   /* 滚动条的位置**永远留着**（scrollbar-gutter），这样有滚动条和没滚动条时
      文字宽度都是一个数——地图那边（.gf-stage）才敢去对齐。
      注意这里不能再写 scrollbar-width: thin：Chromium 一旦看到它就会忽略下面
@@ -830,6 +873,10 @@ const CSS = `
   opacity: 0.85;
 }
 .gf-cols-head span:last-child { padding-left: 16px; border-left: 1px solid var(--gf-line); }
+/* hidden 属性对 display: grid 那一条不管用（它只是 UA 样式里的 display: none，被这里的
+   display 盖掉了）——空态与「还没按过开始冒险」那两种情形下，抬头一直没真收起来过
+   （2026-10-24 用户 m29218 那张截图上就摆着两个空抬头）。 */
+.gf-cols-head[hidden] { display: none; }
 
 /* 2026-10-07 第二层：行与行之间加一条极淡的分隔线。原来只靠 margin-bottom 拉开，
    一整列看起来是一片没有缝的字、找不到一行从哪里开始。
@@ -941,6 +988,30 @@ const CSS = `
    面板 424 → 560px，地图不再写死 360px 而是撑满整行（见 .gf-stage svg），
    viewBox 同时裁掉四周那圈用不上的海（见 buildStage 里的 VIEW）。 */
 .gf-stage svg { display: block; width: 100%; height: auto; touch-action: none; }
+/* 界面审计 U3：地图现在是一个能聚焦、能按的东西（见 buildStage 里那条 keydown），
+   那它得看得出「可以按」，也得让人看见「焦点在我身上」。
+   全图点一下进细节版 ⇒ 全图给 pointer（细节版拖动中由 [data-drag] 那几条接管）。 */
+.gf-stage svg[role='application'] { cursor: pointer; }
+.gf-stage svg[role='application']:focus-visible { outline: 2px solid var(--gf-fg-dim); outline-offset: 2px; border-radius: 6px; }
+
+/* 第一次开门那一下，地图还在铺（2026-10-31，t28）：这行字顶在正中间，
+   底子是同一块纸色，所以看起来像「地图正被摊开」，不像空框或坏掉。
+   它只活到 buildMap 灌完那一刻（见 setOpen 里的 afterPaint），之后 hidden。
+   **这段是模板字符串，注释里不许出现反引号。** */
+.gf-stage-note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--gf-fg-dim);
+  background: var(--gf-stage-bg);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.gf-stage-note[hidden] { display: none; }
 
 /* 凹槽：地图是**嵌**在木头里的一块，所以槽口那一圈阴影得画在**地图上面**。
    2026-10-10 试出来的：这条规则原来写在 .gf-stage 自己的 box-shadow 上，
@@ -995,18 +1066,81 @@ const CSS = `
    比原来光滑的 1909ms 省下三分之二，而用户要的是「连贯不掉帧」，这一档是它换来的。
    仍然守着的一条：**拖动地图时把这三处按停**（见下面 .gf-zooming 那三条）——
    拖动那两秒本来就是最忙的，不能让它再叠上去。 */
+/* **2026-10-31（t29）：这三处搬出了 SVG，住进 HTML 那一层。**
+   上面那些年份写的是「同一条路越走越窄」的过程：搬进自己的 SVG 只省掉「重画整张
+   地图」，每帧改值照样要把那一层重新光栅一遍（8 秒空闲实测 1551ms，其中 Paint 405
+   ＋ Layerize 821）。根子在于 SVG 里的 transform / r / opacity **Chromium 一律交给
+   不了合成器**（A/B：will-change 各种挂法 89%–106%、纯 opacity 版光环 102%）——
+   也就是说，只要它还坐在 SVG 里，就只能靠「少改几次」换 CPU。
+   现在改成 HTML 元素：transform 与 opacity 都归合成器，主线程一个字节都不用重画。
+   三处各自的成本（8 秒空闲，关掉一处看省多少）：光环 ≈ 990ms、记号 ≈ 450ms、
+   灯 ≈ 56ms——搬完之后 8 秒只剩约 90ms。
+
+   尺寸单位仍是**世界单位**：外层「.gf-live」用「transform: scale(每单位多少 px)」
+   把子元素那些 px 解释成世界单位（见 placeLive）。这样下面这些数字跟当年 SVG 里
+   写的那些是一个东西，改的时候不用换算。 */
+.gf-live {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.gf-live-pin,
+.gf-live-lamp {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+
 @keyframes gf-bob {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-1.2px); }
 }
-.gf-pin-bob { animation: gf-bob 2.6s ease-in-out infinite; }
-
-/* 一圈往外扩的光环，让记号在 360px 宽的地图上第一眼就能找到。 */
-@keyframes gf-ping {
-  0% { r: 1.1; opacity: 0.75; }
-  70%, 100% { r: 3.2; opacity: 0; }
+.gf-pin-bob {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  animation: gf-bob 2.6s ease-in-out infinite;
 }
-.gf-pin-ring { animation: gf-ping 2.6s ease-out infinite; fill: none; stroke: var(--gf-seal); stroke-width: 0.4; }
+
+/* 一圈往外扩的光环，让记号在 360px 宽的地图上第一眼就能找到。
+   从前动的是 SVG 的「r」（半径）——最贵的那一种，每帧都要重画；现在是一个 div 的
+   「scale」，合成器自己会放大，主线程零成本。描边不再像原来那样保持 0.4 不变，而是
+   跟着一起放大（合成器是把那一圈光栅好再放大，这是它便宜的原因），看着更像水波。 */
+@keyframes gf-ping {
+  0% { transform: scale(1); opacity: 0.75; }
+  70%, 100% { transform: scale(2.9); opacity: 0; }
+}
+.gf-pin-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  width: 2.2px;
+  height: 2.2px;
+  margin: -3.5px 0 0 -1.1px;
+  border: 0.4px solid var(--gf-seal);
+  border-radius: 50%;
+  animation: gf-ping 2.6s ease-out infinite;
+}
+/* 记号那枚图钉本身（不动的部分）：一张小小的内联 SVG，铺进 HTML 之后就不再改动，
+   光栅一次，之后全靠合成器搬。viewBox 用的还是当年的世界单位。 */
+.gf-pin-glyph {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 5px;
+  margin: -4.4px 0 0 -2px;
+  overflow: visible;
+}
 
 /* 他那儿的灯会晃。晃动幅度很小，小到说不清是不是看错了。 */
 @keyframes gf-flicker {
@@ -1014,7 +1148,47 @@ const CSS = `
   42% { opacity: 0.86; }
   63% { opacity: 0.95; }
 }
-.gf-lamp-flicker { animation: gf-flicker 5.4s ease-in-out infinite; }
+.gf-lamp-flicker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  animation: gf-flicker 5.4s ease-in-out infinite;
+}
+.gf-lamp-glow-1 {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 8px;
+  height: 4.8px;
+  margin: -2.4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--gf-lamp);
+  opacity: calc(var(--gf-glow) * 0.10);
+}
+.gf-lamp-glow-2 {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4.6px;
+  height: 2.8px;
+  margin: -1.4px 0 0 -2.3px;
+  border-radius: 50%;
+  background: var(--gf-lamp);
+  opacity: calc(var(--gf-glow) * 0.16);
+}
+.gf-lamp-glow-3 {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2.3px;
+  height: 1.44px;
+  margin: -0.72px 0 0 -1.15px;
+  border-radius: 50%;
+  background: var(--gf-lamp);
+  opacity: calc(var(--gf-glow) * 0.32);
+}
 
 /* 正在滚见闻录的时候，把上面那三处动画按停（类由滚动处理器挂上、停下 180ms 后摘掉，
    见 「timeline.addEventListener('scroll', …)」那一处）。
@@ -1030,13 +1204,14 @@ const CSS = `
 /* 按住拖地图的时候也按停（类由 zoomDown / zoomUp 挂在那张记号 SVG 上、摘掉）。
    拖动那两秒本来就在满负荷重画世界图那一层，不能再让记号那三个动画叠上去。
    这里只是按停、不改成 steps：手一松就接着光滑地走。
-   （类挂在 .gf-overlay-svg 自己身上，不用去够 .gf-stage 那个 div——buildStage 里没有它的把手。） */
+   2026-10-31（t29）：记号那三处搬进 HTML 层之后，它们不再住在「.gf-overlay-svg」里，
+   所以那个类现在同时挂在「.gf-live」上（见 zoomDown / zoomUp），两条都留着。 */
 .gf-overlay-svg.gf-zooming .gf-pin-bob,
 .gf-overlay-svg.gf-zooming .gf-pin-ring,
-.gf-overlay-svg.gf-zooming .gf-lamp-flicker { animation-play-state: paused; }
-.gf-lamp-glow-1 { fill: var(--gf-lamp); fill-opacity: calc(var(--gf-glow) * 0.10); }
-.gf-lamp-glow-2 { fill: var(--gf-lamp); fill-opacity: calc(var(--gf-glow) * 0.16); }
-.gf-lamp-glow-3 { fill: var(--gf-lamp); fill-opacity: calc(var(--gf-glow) * 0.32); }
+.gf-overlay-svg.gf-zooming .gf-lamp-flicker,
+.gf-live.gf-zooming .gf-pin-bob,
+.gf-live.gf-zooming .gf-pin-ring,
+.gf-live.gf-zooming .gf-lamp-flicker { animation-play-state: paused; }
 
 /* 傍晚之后整张地图往夜色里退——靠给每种材料掺夜色的方式做，
    不糊一层蒙版（蒙版会把陆地外面那块地方也染黑，看着像个灰方块）。 */
@@ -1114,7 +1289,9 @@ const CSS = `
   font-size: var(--gf-k-size, 11px);
   letter-spacing: var(--gf-k-ls, 0.08em);
   color: var(--gf-fg-dim);
-  opacity: 0.55;
+  /* 界面审计 U7：从前这里是 0.55，11px 的字再打对折只剩 2.96:1（classics 2.28:1）——
+     小字本来就细，半透明是奢侈。0.85 之后仍是「次要文字」的调子，但读得清。 */
+  opacity: 0.85;
 }
 /* 当前那一套的名字：它就是那个开关。用正文的颜色写着——不描金、不加框，
    只在底下压一条**很淡的虚线**：旧书里夹了折角、表示「这儿能翻」的那个意思。
@@ -1171,7 +1348,8 @@ const CSS = `
   font-size: calc(var(--gf-k-size, 11px) - 1px);
   letter-spacing: var(--gf-k-ls, 0.08em);
   color: var(--gf-fg-dim);
-  opacity: 0.7;
+  /* 界面审计 U7：10px + 0.7 只有 3.94:1；0.85 抬到 AA 线以上。 */
+  opacity: 0.85;
   white-space: nowrap;
   padding-bottom: 5px;
   border-bottom: 1px solid var(--gf-line);
@@ -1202,8 +1380,15 @@ const CSS = `
    src/packs/reserved.js 各自的 tagline 里）。摊开的那一个读满色，看得出点中了谁。
    点得动的那几项**不摆这一块**：它们悬停时浮出自己那一句，清单里不必再占地方。
    注：这一段里不许出现反引号——整块 CSS 是一个模板字符串，一个反引号就把字符串断开了。 */
+/* 预留的那几套（soon）：名字比能换的淡一点，但**不是禁用**的样子（界面审计 U13：
+   从前 .62 的不透明度跟 [aria-disabled] 的 .4 只差一点，看着像点不动，可它偏偏点得动
+   ——点开是摊出那一句「它的核」）。现在两件事分开说：淡归淡，前面那个小记号和右端
+   的箭头明说「这一行能展开」。 */
 .gf-style-cell { display: flex; flex-direction: column; gap: 3px; }
-.gf-style-item.gf-style-soon { opacity: 0.62; }
+.gf-style-item.gf-style-soon { opacity: 0.72; }
+/* 可展开的记号：合着是 ▸，摊开是 ▾（跟展开状态同一个属性，不用再加状态） */
+.gf-style-item.gf-style-soon::after { content: '▸'; margin-left: 6px; opacity: 0.75; }
+.gf-style-item.gf-style-soon[aria-expanded='true']::after { content: '▾'; }
 .gf-style-item.gf-style-soon[aria-expanded='true'] { opacity: 1; color: var(--gf-fg); }
 /* 点一下才摊开的那一块（默认收着）。里面就是它那一句「它的核」。 */
 .gf-style-note {
@@ -1277,9 +1462,12 @@ const CSS = `
 [data-theme='classics'] .gf-tag {
   border-radius: 2px;
   border-color: var(--gf-seal);
-  color: var(--gf-seal);
   font-family: var(--gf-title-font);
 }
+/* 上面这一条**故意没有 color**（界面审计 U2）：从前这里有「color: var(--gf-seal)」，
+   朱红朱红——可签底是深棕，朱红压上去只有 1.97:1，整排标签成了暗红幽灵，
+   而 classics 自己定义的「--gf-tag-fg: #D9A79C」反倒成了死 token。
+   朱红细框 + 宋体是「印章」的味道，留着；**字色回落到 .gf-tag 的 --gf-tag-fg**。 */
 /* 左栏那几枚（改文件 ×12 / 跑命令 ×9）和右边他冒险里的那几枚**是同一套签**：
    同样的内距、边框、圆角、字号、间距——两栏的行盒因此一样高、横着能对上。
    用户 2026-10-08 第 3 条：「在左右的标签和字体上，完全不一致，左边翻文件、改文件、
@@ -1303,9 +1491,15 @@ const CSS = `
   line-height: 1.55;
   color: var(--gf-files-fg, var(--gf-tag-fg));
   opacity: 0.9;
+  /* 界面审计 U12：从前是 nowrap + 省略号，一个 40 字的长英文名在 246px 里只露出前
+     12 个字（title 属性里有全名，但不悬停就看不见）。改成最多两行、超了才收，
+     行高仍是 1.55——look.mjs 那条「两栏 7 行不被挤断」靠的就是这个行高。 */
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 .gf-remark {
   font-family: var(--gf-story-font, inherit);
@@ -1725,6 +1919,11 @@ const CSS = `
   padding: 0 10px 44px;
   text-align: center;
 }
+/* 还没按过「开始冒险」的那一天（用户 m19218）：整条见闻录就这一颗，一格都不铺。
+   给他一点上边距，别贴着顶。 */
+.gf-list-before-start {
+  padding-top: 56px;
+}
 .gf-start {
   padding: 7px 24px;
   font: inherit;
@@ -1761,6 +1960,8 @@ const CSS = `
 @media (prefers-reduced-motion: reduce) {
   .gf-room, .gf-door, .gf-door-label, .gf-door-crack, .gf-always, .gf-choice-pick, .gf-door-badge, .gf-start { transition-duration: 1ms; }
   .gf-lamp-flicker, .gf-pin-bob, .gf-pin-ring, .gf-type, .gf-door-badge { animation: none; }
+  /* U16 那条天色过渡在「减少动态」里也不该走 1.6 秒 */
+  .mnight { transition-duration: 0s !important; }
 }
 `
 
@@ -1768,7 +1969,6 @@ const CSS = `
  * 小工具
  * ------------------------------------------------------------------ */
 
-const WEEK = 7 * 24 * 60 * 60 * 1000
 const DAY = 24 * 60 * 60 * 1000
 
 function startOfDay(ts) {
@@ -1777,11 +1977,38 @@ function startOfDay(ts) {
   return d.getTime()
 }
 
+/**
+ * 本地日历上的加减天数。
+ *
+ * 不能用 `ts ± n * DAY`：那是「毫秒减法」，而本地一天在夏令时开关那两天只有
+ * 23 或 25 小时。差的这一小时会让周卷标签（「这一周」/「上一周」）在换季那周偏一整天。
+ * 插件是要装到别人机器上的，别人在不在夏令时区我们不知道，所以一律走本地日历。
+ */
+function addDays(ts, n) {
+  const d = new Date(ts)
+  d.setDate(d.getDate() + n)
+  return d.getTime()
+}
+
+/**
+ * 一条记录上的「一串东西」：`files`、`deliverables`、`helpers` 这些。
+ *
+ * 老记录、手写样本、别人塞进来的数据里，这个字段可能写成**字符串**而不是数组
+ * （`files: "a.js"`）。直接 spread 会把它拆成一个个单字，屏幕上就出现
+ * 「a · . 等 5 个」这种东西（报告 B-07）。这里收成一个诚实的小工具：
+ * 是数组就用，是字符串就当只有一项，其余一律当没有。
+ */
+function listOf(value) {
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string' && value !== '') return [value]
+  return []
+}
+
 /** 那一周的周一零点 */
 function startOfWeek(ts) {
   const d = new Date(startOfDay(ts))
   const dow = (d.getDay() + 6) % 7 // 周一 = 0
-  return d.getTime() - dow * DAY
+  return addDays(d.getTime(), -dow)
 }
 
 /** 那个月的月首零点。`back` 是往前推几个月（折叠阶梯用它定「最近十二个月」的界）。 */
@@ -1807,7 +2034,7 @@ function formatDate(ts) {
 function weekLabel(weekStart, now) {
   const thisWeek = startOfWeek(now)
   if (weekStart === thisWeek) return '这一周'
-  if (weekStart === thisWeek - WEEK) return '上一周'
+  if (weekStart === addDays(thisWeek, -7)) return '上一周'
   const d = new Date(weekStart)
   return `${d.getMonth() + 1} 月 ${d.getDate()} 日那周`
 }
@@ -1993,6 +2220,68 @@ function mergeTick(a, b) {
 }
 
 /**
+ * 按下「开始冒险」之后，今天从**下一格整五分钟**起铺（8 → 9，用户 m04200 逐字：
+ * 「不是，我刚刚点开，就已经存在2条冒险在里面了，这是不对的。当用户点开的时候，
+ * 才会开始计算时间，并到下一个5分钟的时候才会落盘。」）。
+ *
+ * 起点落在 20:07 时，20:05–20:10 那一格里既有按下之前的几十秒、也有按下之后的活：
+ * 半格不能算，可整格又还没到。所以第一格是**跨过下一个整五分钟**那一格（20:10）
+ * ——他原话里「到下一个5分钟」说的就是这个边界。
+ *
+ * 三件事，缺一件那半格就会漏出来：
+ *   · 在起点之前就结束的记录整条不铺（宿主的 `pruneStore` 已经把它们从盘上删了，
+ *     这里再挡一次：预览页、自检、别人写的老存档都可能有）；
+ *   · 还没走到那一格时，今天一格都不铺（先摆一行「上一格」到点再跳，比空着更像错）；
+ *   · 第一格之前的格子（`startedAt`、`cells`、`ticks`）一律往上推到这一格。
+ *     记录还是那条记录，只是「这一场从哪一格开始讲」由按下那一刻决定——
+ *     那半格里的活不丢，落在他真正开始的那一格里。
+ */
+function clipToStart(entries, dayStart, now = Date.now()) {
+  const at = Number(dayStart) || 0
+  if (!at) return entries
+  const first = Math.ceil(at / LAND_MS) * LAND_MS
+  if (!(Number(now) >= first)) return []
+  const out = []
+  for (const entry of entries) {
+    if (entry && entry.seam === true) {
+      out.push(entry)
+      continue
+    }
+    const ended = Number(lastEnded(entry)) || 0
+    if (!(ended >= at)) continue
+    const started = Number(entry?.startedAt) || 0
+    if (started >= first && (ended >= first)) {
+      out.push(entry)
+      continue
+    }
+    const next = { ...entry, startedAt: Math.max(started, first), endedAt: Math.max(ended, first) }
+    if (Array.isArray(entry?.ticks)) {
+      const moved = []
+      const kept = []
+      for (const tick of entry.ticks) {
+        const tickAt = Number(tick?.at)
+        if (!Number.isFinite(tickAt)) continue
+        if (tickAt >= first) kept.push(tick)
+        else moved.push(tick)
+      }
+      if (moved.length) {
+        let merged = { ...moved[0], at: first }
+        for (const tick of moved.slice(1)) merged = mergeTick(merged, tick)
+        kept.push(merged)
+      }
+      kept.sort((a, b) => Number(a.at) - Number(b.at))
+      next.ticks = kept
+      // `cells` 与 `ticks` 同源（宿主是同一把尺子造的），推到同一格上才不打架。
+      next.cells = kept.map((tick) => Number(tick.at))
+    } else if (Array.isArray(entry?.cells)) {
+      next.cells = entry.cells.map((cell) => Math.max(Number(cell) || 0, first))
+    }
+    out.push(next)
+  }
+  return out
+}
+
+/**
  * 一行的清单，**从新到旧**。
  *
  * @returns `{ key, entry, at, tick, head }`
@@ -2174,9 +2463,9 @@ function rollUnit(tier, fromAt, list, partial = false) {
       for (const [act, n] of Object.entries(record.counts || {})) counts[act] = (counts[act] || 0) + (Number(n) || 0)
       actions += Number(record.actions) || 0
       fails += Number(record.fails) || 0
-      for (const tag of record.tags || []) tags.set(tag, (tags.get(tag) || 0) + 1)
-      for (const file of record.files || []) files.set(file, (files.get(file) || 0) + 1)
-      for (const deed of record.deliverables || []) deeds.add(deed)
+      for (const tag of listOf(record.tags)) tags.set(tag, (tags.get(tag) || 0) + 1)
+      for (const file of listOf(record.files)) files.set(file, (files.get(file) || 0) + 1)
+      for (const deed of listOf(record.deliverables)) deeds.add(deed)
       from = Math.min(from, Number(record.startedAt) || unit.at)
       to = Math.max(to, Number(lastEnded(record)) || unit.at)
     } else {
@@ -2362,7 +2651,7 @@ export let HOME_LINES = [
   '他把斗篷解下来，在门槛上坐了一会儿。',
   '他回去睡了一觉，天没黑就醒了。',
   '他在灶边热了碗汤，顺手把灯拨亮。',
-  '他把行囊里的东西倒出来，重新收拾了一遍。',
+  '他把箱笼里的东西倒出来，重新收拾了一遍。',
   '他回去添了件衣裳，把刀在石头上蹭了两下。',
   '他坐在床边把当天的路在心里过了一遍。',
   '他灌了壶水，靠在门框上歇了歇。',
@@ -2428,7 +2717,7 @@ export let WORLD_LINES = {
     '北风把雪从门缝里送进来，地上白了一小片。',
     '山顶那堆火燃到半夜，像是有人守着。',
     '塔上的符灯换过第三轮，光从一排屋脊上扫过去。',
-    '北边龙骨山脉那头亮了一下，隔了很久才传过来一声闷响。',
+    '北边霜脊山脉那头亮了一下，隔了很久才传过来一声闷响。',
     '巡夜的把街口那几盏符灯一盏盏挑亮，走到巷尾又灭了。',
     '废墟那头有人守着一堆火，火里偶尔炸出一星蓝的。',
   ],
@@ -2444,12 +2733,12 @@ export let WORLD_LINES = {
     '海面上的白气散开，露出两艘没有旗的船。',
     '太阳从山脊上露头，桥面那层白慢慢退了。',
     '法师塔的钟先响，城里的鸡才跟着叫。',
-    '雾散的时候，能看见龙骨山脉那道白线横在北边。',
+    '雾散的时候，能看见霜脊山脉那道白线横在北边。',
     '城门还没开，守门的先挨个验过进出的符牌。',
     '法师塔上那盏灯亮了一夜，天快亮时才灭。',
   ],
   road: [
-    '官道上有几段塌了土，绕路要多走半天。',
+    '大路上有几段塌了土，绕路要多走半天。',
     '他过桥的时候，桥下漂着一块带血的门板。',
     '道旁的路碑倒了一块，断口还是新的。',
     '沿路有几个村子空了，窗子都敞着。',
@@ -2460,14 +2749,14 @@ export let WORLD_LINES = {
     '渡口的船让人凿穿了一条，船家说要等明天。',
     '走了很远才看见一处人家，烟囱里没有烟。',
     '道旁那排符灯只剩两盏还亮着，别的都让人摘走了。',
-    '往北的车辙一直压到灰烬之地那头，中间没有岔路。',
+    '往北的车辙一直压到那片焦土边上，中间没有岔路。',
     '他在银树森林边上碰见守林人，跟着走了一段近路。',
     '道旁插着一把断剑，刃上还留着半行刻字。',
   ],
   visitor: [
     '中午来了个牵骡子的人，问往北那道口子封没封。',
     '门外站着个披斗篷的，一直到天黑都没走。',
-    '一个货郎挑着担子在檐下歇脚，担子一头挂着两只风干的兔。',
+    '一个收旧符的挑着担子在檐下歇脚，担子一头挂着两只风干的兔。',
     '一个背弓的姑娘来问乱石岗那片废墟的事。',
     '傍晚来了三个生脸，说要雇人走一趟矿洞。',
     '有个瞎眼的老人被牵进来，说听见地下有人在敲。',
@@ -2477,24 +2766,24 @@ export let WORLD_LINES = {
     '有个孩子送来一封信，说是桥头一个戴兜帽的人给的。',
     '来了个披灰斗篷的人，问他认不认得墙上那行旧咒。',
     '有个收旧符的挑着担子过来，把画废的纸一张张翻过。',
-    '灰烬之地过来的那一队人在城外扎了营，不进城门。',
+    '北边那片焦土过来的两个人在城外扎了营，不进城门。',
     '来了个带剑的年轻人，问他往北那道口子怎么走。',
   ],
   news: [
-    '打听铺里说，北边那条道夜里封了。',
+    '渡口的人说，北边那条道夜里封了。',
     '有人从矿洞那头回来，说底下又塌了一段。',
     '码头上传的话是，海里近岸来了两艘不长眼的船。',
     '佣兵会的板子上新添了一张条子，赏的是活捉。',
     '有个守夜人说，城墙外那圈脚印一夜之间多了三倍。',
-    '集上都在讲一件事，乱石岗那片废墟里又有了火光。',
+    '货栈那边都在讲一件事，乱石岗那片废墟里又有了火光。',
     '一个过路的僧人说，河上游的桥让人拆了。',
     '酒馆里最靠里的那桌在传，南边有一整支队伍不见了。',
     '旧书贩子说，古咒里提到的那种东西醒了一回。',
     '雇主那边捎话来，说揭榜的人当天就出了城。',
-    '打听铺里说，法师塔把底下那层封了，不让人靠近。',
-    '有人从灰烬之地回来，说那边地上又开始冒白气。',
+    '公会门口的人说，法师塔把底下那层封了，不让人靠近。',
+    '有人从北边回来，说那片焦土上又开始冒白气。',
     '码头上传的话是，珊瑚海国那两艘船在近岸停了三天。',
-    '打听铺里说，法师塔新收了几个学徒，这两天街上常能碰见。',
+    '铁匠铺门口的人说，法师塔新收了几个学徒，这两天街上常能碰见。',
   ],
   encounter: [
     '他在断墙后面挨了{e}下，才把那只灰皮的兽逼退。',
@@ -2534,10 +2823,15 @@ export let WORLD_QUIET = [
   '檐水敲了台阶一夜，天亮时忽然停了。',
   '远城的钟敲了三下，隔着两条街传过来，闷闷的。',
   '街口的符灯亮了一夜，天亮时有人来换灯芯。',
-  '塔上那口钟敲过三下，街上的狗跟着叫了一阵。',
+  '法师塔的钟敲过三下，街上的狗跟着叫了一阵。',
   '檐下挂的那道旧符被风吹得翻了个面，又翻回来。',
   '街上有人试法术，檐角那串铜铃响了一路。',
 ]
+
+// 兜底桶在表里得有个位置（**同一个数组，不抄第二份文本**）：`worldLine` 挑不到具体桶时
+// 落到 `quiet`，而自检（`scripts/verify-rules.mjs`）与 `worldBucket` 都是按「桶名 →
+// `WORLD_LINES[桶名]`」查的。所以这里把上面那份 `WORLD_QUIET` 接成第七个桶；
+// 包里同理（`src/packs/index.js` 的 `applyPack` 从 `worldQuiet` 派生），别在文案里抄两遍。
 WORLD_LINES.quiet = WORLD_QUIET
 
 export let VOICES = {
@@ -2548,7 +2842,7 @@ export let VOICES = {
       跑命令: '他在院子里试那件法器，试了三回还没顺。',
       翻文件: '他在旧卷轴堆里翻一句话。',
       查资料: '他问过三处，说法都不一样。',
-      派了活: '他打发同伴出去打探，自己守着摊子。',
+      派了活: '他托人出去打探，自己守着摊子。',
       聊了聊: '他在窗边跟人闲聊，没什么正事。',
     },
     words: {
@@ -2556,7 +2850,7 @@ export let VOICES = {
       跑命令: ['试法器', '调机关', '修炉子', '装符石', '开炉'],
       翻文件: ['翻卷轴', '找旧记载', '上架子', '搬箱笼', '查旧册'],
       查资料: ['打听', '问路', '探消息', '访旧人', '对说法'],
-      派了活: ['派同伴', '打发帮手', '分派路线', '贴悬赏'],
+      派了活: ['托人跑腿', '捎话', '分派路线', '贴悬赏'],
       聊了聊: ['闲聊', '搭话', '听人说', '叙旧'],
       深夜: ['深夜', '夜里'],
       很晚了: ['入夜', '夜深'],
@@ -2752,16 +3046,16 @@ export let SCENES = {
         key: 'map',
         w: '补地图',
         lead: [
-          '他趴在桌上补一张破了角的疆域图',
+          '他趴在桌上补一张破了角的地图',
           '他沿着旧线把断掉的一段描上',
           '他拿尺子比着把河道往北挪',
           '他在图边补上两个没标名字的村子',
           '他把补好的那块举起来对光看',
-                '那张疆域图在桌上摊了许久，边角压着块石头',
+                '那张地图在桌上摊了许久，边角压着块石头',
 ],
         tail: [
           '图角的破口他用浆糊粘住了',
-          '描到一半，尺子滑了一下',
+          '尺子滑了一下，新描的那道歪出纸边',
           '他把新描的线对着旧图比了比',
           '挪过的那一段怎么看都不对',
           '他吹干墨，把图卷起来收进筒里',
@@ -2804,7 +3098,7 @@ export let SCENES = {
           '他捏着最小的那块零件往槽里塞',
           '他给齿盘上了油再装回去',
           '他趴在机关上听齿盘咬合的声音',
-                '同伴提着灯照了半天，说少了一片垫片',
+                '他托人提着灯照了半天，说少了一片垫片',
 ],
         tail: [
           '齿盘咬上，那件东西安静下来',
@@ -2880,7 +3174,7 @@ export let SCENES = {
           '架上空出来的位置他记住了',
           '梯子挪了半步，他脚尖点地',
           '他从梯子上滑下来磕了膝盖',
-          '顶层那只匣子他够着了才下来',
+          '略高的那一层他够着了才下来',
                 '最上一层他踮脚够了三次才够着',
         '挪位的时候脚下一滑，他攥住架子才站稳',
         '顶层那只匣子扣着暗锁，钥匙早不知去向',
@@ -2937,7 +3231,7 @@ export let SCENES = {
         key: 'ask',
         w: '打听',
         lead: [
-          '他挨个问过城里的人',
+          '他挨个问过镇上的人',
           '他跑了一趟商队营地打听一件事',
           '他在酒馆里坐到半夜等人开口',
           '他拦住一个赶路的行商问了句',
@@ -3000,48 +3294,48 @@ export let SCENES = {
 ],
       },
     ],
-    // 派了活：派同伴 / 分路线 / 贴悬赏，出门的人各有各的去向
+    // 派了活：托人跑腿 / 分路线 / 贴悬赏，出门的人各有各的去向
     派了活: [
       {
         key: 'crew',
-        w: '派同伴',
+        w: '托人跑腿',
         lead: [
-          '他打发同伴出去打探',
-          '他在门口给同伴交代了几句',
-          '他数了数人手把人分成两拨',
-          '他给出去的人各塞了一份干粮',
-          '他站在檐下看同伴一个个走远',
-                '老同伴说，天黑前回不来就别等了',
+          '他托街口那孩子去打听一件事',
+          '他在门口把话跟跑腿的交代清楚',
+          '他把要带的东西数了一遍，够跑两趟',
+          '他给跑腿的塞了一份干粮',
+          '他站在檐下看那孩子跑远',
+                '那孩子的娘说，天黑前回不来就别等了',
 ],
         tail: [
           '自己守着摊子等消息',
-          '回来的只有一半，剩下的还没影',
-          '有个同伴回来说路上不太平',
+          '回话的只带回一半，剩下的没打听着',
+          '跑腿的回来说路上不太平',
           '天黑透了，门才又响了一声',
           '他把空椅子摆回原位',
-                '隔了一夜门口才回来一个人，行囊丢在了路上',
+                '隔了一夜门口才回来一个人，捎的东西丢在了路上',
         '干粮分出去大半，他自己那份留到了最后',
-        '有人半夜敲窗，说出去的那队只回来两个',
+        '有人半夜敲窗，说托出去的话没带到',
 ],
       },
       {
         key: 'route',
         w: '分派路线',
         lead: [
-          '他把几个人分别派往三个方向',
+          '他把三件事分别托给三个人',
           '他在纸上给每人画了一条路线',
-          '他抓了几根草签让同伴抽',
+          '他抓了几根草签让孩子抽',
           '他把要走的顺序排好写在纸上',
-          '他给每队人指了碰头的地方',
+          '他跟每个人说清回来在哪儿碰头',
                 '赶车的说，西边那条溪涨了水，得绕道',
 ],
         tail: [
-          '三队人走的方向都不重样',
-          '有一队走岔了，天黑才回来',
-          '他把没派出去的人留在身边',
+          '三个人走的方向都不重样',
+          '有一个走岔了，天黑才回来',
+          '剩下的事他自己留着做',
           '纸上的路线他描粗了一笔',
           '碰头的地方定在城门口老树下',
-                '画到一半他把最短的那条划掉了，没往那边派人',
+                '画到一半他把最短的那条划掉了，没往那边托人',
         '纸上排的顺序到第三行就乱了，他重画了一张',
         '抽到长签的那两个人走岔了道，入夜才摸回来',
 ],
@@ -3051,21 +3345,20 @@ export let SCENES = {
         w: '贴悬赏',
         lead: [
           '他在佣兵会的悬赏板上贴了张招人的条子',
-          '他写了一叠招条挨家挨户送',
-          '他拿浆糊把招条抹平贴上墙',
-          '他把招条上的字重新写了一遍',
-          '他站在墙边看人念那张招条',
+          '他写了一叠悬赏条，挨家挨户送',
+          '他拿浆糊把悬赏条抹平贴上墙',
+          '他把悬赏条上的字重新写了一遍',
+          '他站在墙边看人念那张悬赏条',
                 '管悬赏板的老兵说，写得越长越没人看',
 ],
         tail: [
           '有人停下来看了两眼就走了',
-          '风把招条吹起一个角',
-          '浆糊没干，他用手按了按',
+          '风把悬赏条吹起一个角',
+          '纸角翘起来，他伸手按了按',
           '揭下来的旧条子他扔进了筐',
           '到了傍晚条子下添了两个名字',
-                '招条贴到入夜，围看的人换了两拨，没一个揭下来',
-        '浆糊没干，风一吹那张纸先垂了一角',
-        '隔了两天板上添了新的招条，他这张被压在了底下',
+                '悬赏条贴到入夜，围看的人换了两拨，没一个揭下来',
+        '隔了两天板上又添了新的，他这张被压在了底下',
 ],
       },
     ],
@@ -3076,15 +3369,15 @@ export let SCENES = {
         w: '闲聊',
         lead: [
           '他靠在窗边跟人闲聊',
-          '他跟旅店的伙计扯了几句',
+          '他跟旅店的学徒扯了几句',
           '他把酒碗推过去又添了一回',
           '他跟挨着坐的人有一搭没一搭地说',
           '他靠着柜台跟人说了半晌',
-                '掌柜的擦着碗说，北边来的人这回绕了远路',
+                '店主擦着碗说，北边来的人这回绕了远路',
 ],
         tail: [
           '说的没什么正事',
-          '说的都是城里的旧事',
+          '说的都是镇上的旧事',
           '天黑了才想起该收摊',
           '话没说完，人先散了',
           '壶里的酒添过几回，他没起身',
@@ -3121,20 +3414,20 @@ export let SCENES = {
         lead: [
           '他在路口跟行商搭了句话',
           '他朝树下歇脚的人拱了拱手',
-          '他蹲下来跟货郎问了两句',
+          '他蹲下来跟行商问了两句',
           '他摘下兜帽跟对面的人点了点头',
           '他站在桥头跟过路的人打招呼',
                 '牵马的人在桥头勒住缰绳，问他要不要捎一段',
 ],
         tail: [
-          '那人回了两句就挑担走了',
+          '那人回了两句就上路了',
           '说的都是路上的天气',
           '话头断在那儿，他也没接',
           '来人卸下担子跟他聊了会儿',
           '他拱了拱手转身走了',
                 '问过之后那人只管往前走，斗篷上的雪抖了一路',
         '兜帽摘到一半，那人已经走远了',
-        '那人把行囊往肩上挪了挪，说了两句就上路了',
+        '那人把箱笼往肩上挪了挪，说了两句就上路了',
 ],
       },
     ],
@@ -3220,7 +3513,7 @@ export let SHARDS = {
     map: {
       w: '补地图',
       more: [
-        '那张疆域图他补了{n}遍，边线描了又擦',
+        '那张地图他补了{n}遍，边线描了又擦',
         '河道往北挪过{n}回，怎么摆都不顺眼',
         '他对着旧图量了{n}遍，图角磨得发亮',
       ],
@@ -3405,7 +3698,7 @@ export let SHARDS = {
         '路碑他一道一道数过去，数到{n}块天就黑了',
       ],
       paid: [
-        '商队雇他认一段路，定金先揣进了行囊',
+        '商队雇他认一段路，说好回来再结',
         '他把走熟的这条道领着人走了一趟，收了几枚铜币',
       ],
       hurt: [
@@ -3438,15 +3731,15 @@ export let SHARDS = {
       ],
     },
     crew: {
-      w: '派同伴',
+      w: '托人跑腿',
       more: [
-        '这种事他前后做过{n}回，门口等的人换了好几拨',
-        '他打发人出去{n}趟，回话的从来不是同一个',
-        '他把人手点了{n}遍，总共就那几个熟脸',
+        '这种事他前后托过{n}回，门口等的人换了好几拨',
+        '他托人出去{n}趟，回话的从来不是同一个',
+        '他把要托的事数了{n}遍，剩下的还是那几件',
       ],
       paid: [
-        '他把工钱当面点了两遍，一人一份分下去，剩下的自己收着',
-        '来的那队人领了钱就走，他把剩下的定金压在木匣底下',
+        '他把跑腿钱当面点清，剩下的自己收着',
+        '来的人领了钱就走，他把剩下的铜币压在木匣底下',
       ],
       hurt: [
         '派出去的人挨了{e}回打，回来还得他给包扎',
@@ -3454,46 +3747,46 @@ export let SHARDS = {
       ],
       again: [
         '那件事还悬着，回来的人没带回准信',
-        '上一拨人还没消息，门口的椅子空着',
+        '上一趟的人还没消息，门口的椅子空着',
       ],
     },
     route: {
       w: '分派路线',
       more: [
-        '这条线他走熟了，前后派过{n}队人过去',
+        '这条线他走熟了，前后托过{n}趟',
         '他在图上把路线描了{n}遍，每一遍都多出一个岔口',
-        '他把人手分作{n}路，各走各的方向',
+        '他把要托的事分作{n}件，各走各的方向',
       ],
       paid: [
-        '三队人回来交齐了东西，他把报酬按路远近分好',
-        '他领着一队人走了趟远路，回来时袋里沉了些',
+        '三个人回来交齐了东西，他把酬劳按路远近分好',
+        '他领着一趟走了远路，回来时袋里沉了些',
       ],
       hurt: [
         '有{e}队人在半道上摔进了沟里，货也散了一半',
         '派出去的人挨了{e}回黑手，路条都被撕了',
       ],
       again: [
-        '疆域图上那一段还没描完，界线只画到第三个岔口',
+        '地图上那一段还没描完，界线只画到第三个岔口',
         '出去的人一个都没回，岔口那盏灯还亮着',
       ],
     },
     poster: {
       w: '贴悬赏',
       more: [
-        '这种招条他写过{n}张，墙上没剩几张完整的',
+        '这种悬赏条他写过{n}张，墙上没剩几张完整的',
         '他往那块板上贴过{n}回，来应的人一次比一次少',
-        '招条上的火漆他按了{n}遍，条子才粘牢在墙上',
+        '悬赏条上的火漆他按了{n}遍，纸才粘牢在墙上',
       ],
       paid: [
         '揭条子的人跑了趟腿，说好的钱数当面给清了',
-        '招条贴出去第三天就有人来应，他把定金先付了一半',
+        '悬赏条贴出去第三天就有人来应，他把人名一个个记了下来',
       ],
       hurt: [
-        '有{e}回招条让人撕了，他重贴的时候挨了一顿数落',
+        '有{e}回悬赏条让人撕了，他重贴的时候挨了一顿数落',
         '他贴条子时从凳子上摔下来{e}回，膝盖磕青了',
       ],
       again: [
-        '板上那张招条还有半截没揭下来',
+        '板上那张悬赏条还有半截没揭下来',
         '那面墙上的字让雨冲淡了，一直没人来补',
       ],
     },
@@ -3627,7 +3920,7 @@ export const OUT_SCENES = {
         '他绕着乱石岗走了半圈，从北边那道缺口翻进去',
       ],
       tail: [
-        '描到一半，墙头那层浮土被风刮下来，刚描的那行又糊了',
+        '墙头那层浮土被风刮下来，刚描的那行又糊了',
         '崩掉的一角他够不着，垫着碎石往上探',
         '火把烧到末了，剩下半行他只用指甲划了道浅印',
         '墙根那口枯井里起了响动，他停了手没再往下描',
@@ -3645,7 +3938,7 @@ export const OUT_SCENES = {
         '他在霜原上照着车辙走了大半日，天没黑就先扎了营',
         '他把那卷东西裹进油布里，又垫了一层干草',
         '他拿火镰敲了三下才点着篝火，就着火把绳子解开又系紧',
-        '他出门那天北边龙骨山脉压着一层云',
+        '他出门那天北边霜脊山脉压着一层云',
       ],
       tail: [
         '雪落了一夜，第二天他踩着没膝的雪往北接着走',
@@ -3721,7 +4014,7 @@ export const OUT_SCENES = {
         '他翻到一半，塔身又塌下来一层灰，落了满头发',
         '底下那层传来脚步声，他把手里那本合上贴到墙边听',
         '有一页被他揭破了，字迹断在中间，他没敢再往下翻',
-        '他把挑出来的那几本塞进行囊，从塌口翻了出去',
+        '他把挑出来的那几本塞进箱笼，从塌口翻了出去',
         '翻到末几页，纸边上那些字像是被人用指甲划掉的',
       ],
     },
@@ -3740,7 +4033,7 @@ export const OUT_SCENES = {
       tail: [
         '那一片让雨糊了，他跟守夜人各认出一个',
         '后半夜风大，雪粒子横着打在脸上，他一直没停',
-        '守夜人把手里的更鼓敲了一下，说这几夜都没人打这儿过',
+        '守夜人把手里的灯举高了些，说这几夜都没人打这儿过',
         '那只木牌让虫子蛀空了一半，刻痕一碰就掉渣',
         '他把对上的那几处圈出来，剩下的写在纸边',
         '墙上那道旧符已经焦了一半，管这一段的人说入冬前得换',
@@ -3764,12 +4057,12 @@ export const OUT_SHARDS = {
     hurt: [
       '他描到第{e}遍，墙里伸出一截枯手抓在他腕上，他甩开时蹭掉一块皮',
       '第{e}回撞上一群在废墟里过夜的石鸦，他护着脸挨了几下啄，怀里的干粮撒了一地',
-      '他描到第{e}遍，墙缝里又探出一截枯手，他把残咒卷成棒打回去，小臂让抓出几道口',
+      '墙缝里又探出一截枯手，他把残咒卷成棒打回去，小臂让抓出几道口',
       '第{e}回他踩进废墟的坑里，石鸦扑下来啄他后颈，他抱头滚出半丈，怀里那页也让水浸烂',
     ],
     again: [
       '那堵墙还立着半截，描到一半的那行让雨冲淡了半边',
-      '拓坏的那几张还压在行囊底下，边角都卷了',
+      '拓坏的那几张还压在箱笼底下，边角都卷了',
     ],
   },
   frost: {
@@ -3784,9 +4077,9 @@ export const OUT_SHARDS = {
       '他把契书交到对方手里，收下工钱，顺手讨了一夜的马厩',
     ],
     hurt: [
-      '他在半道上被一群雪狼截住{e}回，马鞍上的行囊撕开了，干粮撒进雪里',
+      '他在半道上被一群雪狼截住{e}回，马鞍上的箱笼撕开了，干粮撒进雪里',
       '第{e}回他撞上劫道的，肩上挨了一刀，血浸透了领口，那卷东西护在胸口才没让人夺去',
-      '他在岔道上让一群雪狼围住{e}回，抡起短刀劈开一头，小腿还是让咬穿了一块',
+      '他在岔道上让一群雪狼围住{e}回，抡起断剑劈开一头，小腿还是让咬穿了一块',
       '第{e}回他在桥头撞上劫道的，契书塞进石缝，肩背挨了两棍，钱袋也让人抢走',
     ],
     again: [
@@ -3809,7 +4102,7 @@ export const OUT_SHARDS = {
       '他在坑道里撞上一窝栖在石缝里的蝙蝠，脸上挨了{e}回扑，被抓开一道口子，手里的矿灯也灭了',
       '第{e}回水漫上来，水底翻上来一头没有眼睛的东西扯住他的脚踝，他挣开时把镐头丢了',
       '往前摸到第{e}处岔口，石缝里又钻出一窝蝙蝠，他挥铁镐赶散它们，耳朵被咬穿一块',
-      '下到第{e}处水坑，水里那个没有眼睛的东西缠住他的小腿，他蹬开它时短刀脱手落了水',
+      '下到第{e}处水坑，水里那个没有眼睛的东西缠住他的小腿，他蹬开它时断剑脱手落了水',
     ],
     again: [
       '坑里的水还剩半人深，那台铁家伙还架在泥里',
@@ -3830,7 +4123,7 @@ export const OUT_SHARDS = {
     hurt: [
       '那件东西第{e}回炸开，他抬手去挡，水里腾起一片白气，小臂上的皮燎掉一块',
       '第{e}回石桩松了，那件东西顺着水漂过来贴住他的腿，他甩开时整个人摔进水里',
-      '拽到第{e}遍，那件东西在手里发烫，水面腾起一片白雾，他撒手退开，裤脚还是燎穿了',
+      '那件东西在手里发烫，水面腾起一片白雾，他撒手退开，裤脚还是燎穿了',
       '第{e}回水面开裂，水底伸出一只青灰的手扯他的腰带，他掰开那几根指头，缆绳断了一股',
     ],
     again: [
@@ -3927,73 +4220,73 @@ export const HURT_PATCH = {
     '抄到第{e}笔，纸上那行咒文立起来扑他，他抬手挡了一记，手背让墨线割开了。',
     '誊到第{e}遍，纸缝里钻出一只灰皮的虫，他把银墨碗砸过去才逼退它，案角也让掀翻了。',
     '临到第{e}笔，纸上那行咒文缠住他的手腕，他咬断墨线才抽出手，虎口裂开一道口子。',
-    '磨到第{e}遍，灰皮的虫又爬上来咬他手背，他把砚台扣下去砸碎了它，袖口让它啃掉半幅。',
+    '灰皮的虫又爬上来咬他手背，他把砚台扣下去砸碎了它，袖口让它啃掉半幅。',
   ],
   talisman: [
     '画到第{e}笔，符脚上窜出一只赤背的兽，他拿镇石把它捺回去，半叠符纸烧成了灰。',
     '描到第{e}张，银墨里立起一个没有脸的人影，他扯下斗篷罩住它，自己肩头烧穿了一个洞。',
     '描到第{e}笔，符脚上窜出那只赤背的兽，他把镇石推过去压住它，桌沿让撞裂一条缝。',
-    '誊到第{e}张，银墨里那个人影伸手抓他，他拿斗篷抽开它，手背让它烙出一片印子。',
+    '银墨里那个人影伸手抓他，他拿斗篷抽开它，手背让它烙出一片印子。',
   ],
   deed: [
     '刮到第{e}处，那方火漆裂开，里头伸出一只黑手，他拿刀背砸开它，指节磕出了血。',
     '改到第{e}处，押约那户人家提着剑找上门，他把契书按在怀里挨了一记，左肩到现在抬不起来。',
-    '刮到第{e}处，火漆缝里那只黑手掐住他脖子，他拿尺条撬开，喉口留下几道青印。',
-    '押到第{e}处，那户人家提剑堵住门口，他抱紧契书挨了一脚，纸角撕掉半幅。',
+    '火漆缝里那只黑手掐住他脖子，他拿尺条撬开，喉口留下几道青印。',
+    '那户人家提剑堵住门口，他抱紧契书挨了一脚，纸角撕掉半幅。',
   ],
   map: [
     '描到第{e}道路碑，图上那片废墟动了，两只狼大小的东西跨出纸面，他卷起图退到门口，肩上挨了一记。',
     '量到第{e}遍，图角上那道霜爬到他手腕，他拿灯油把它烧断，那半张旧图也一并烧没了。',
-    '描到第{e}处，图上又跨出一只狼大小的东西，他拿图卷抽它，小腿让划开一道口。',
-    '量到第{e}遍，那道霜顺着图角爬上他手背，他拿灯油泼上去烧断，半截袖子也烧没了。',
+    '图上又跨出一只狼大小的东西，他拿图卷抽它，小腿让划开一道口。',
+    '那道霜顺着图角爬上他手背，他拿灯油泼上去烧断，半截袖子也烧没了。',
   ],
   device: [
     '试到第{e}遍，那件法器挣开他的手，光里冲出一只铁翅的东西，他掀翻石台挡了一记，肩膀撞在墙上。',
     '退开第{e}回，它自己滚下来，唤出一群灰影，他点起火把把它们逼回纹路里，火把烧到了指头上。',
-    '摆到第{e}遍，那件法器弹开，铁翅的东西从光里扑下，他抡石台顶过去，手背被翅尖划开一道。',
+    '那件法器弹开，铁翅的东西从光里扑下，他抡石台顶过去，手背被翅尖划开一道。',
     '第{e}回纹路断了一截，灰影从缝里涌出来，他举火把一路撵回去，头发烧焦了一片。',
   ],
   gear: [
     '拆到第{e}遍，齿盘底下钻出一只铁壳的虫，他拿铜钳夹住它，虎口让它的牙划开了。',
     '对到第{e}遍，矿洞那头爬来一只石背的东西，他抡铜锤把它砸翻，小腿上还是挨了一口。',
-    '拧到第{e}遍，齿盘翻过来咬住机轴，铁壳的虫爬上他手背，他拿铜钳磕开它，指节蹭掉一层皮。',
+    '齿盘翻过来咬住机轴，铁壳的虫爬上他手背，他拿铜钳磕开它，指节蹭掉一层皮。',
     '第{e}回铰链崩了，石背的东西从矿洞那头撞进来，他抡铁墩把它顶在岩壁上，脊背也撞青了。',
   ],
   stove: [
     '烧到第{e}回，炉膛炸开，火里走出来一只赤鳞的兽，他抄起铁钳把它捅回去，眉毛燎没了。',
     '捅到第{e}遍，风箱倒抽一口，窜出一条赤红的长虫，他抡钎子把它钉在砧上，半边袖子也烧成了灰。',
-    '烧到第{e}遍，炉门让火顶开，赤鳞的兽从灰里立起来，他抡铁钳把它捅回去，额发焦了一缕。',
+    '炉门让火顶开，赤鳞的兽从灰里立起来，他抡铁钳把它捅回去，额发焦了一缕。',
     '第{e}回风箱回火，赤红的长虫顺着钎子爬上来，他把它掼进炉膛，手背燎出一串水泡。',
   ],
   scroll: [
     '摊到第{e}卷，卷里伸出一只干枯的爪子，他拿裁刀割断那截纸才挣脱，腕上勒出一道血痕。',
     '翻到第{e}回，轴心里爬出一只生着灰翅的虫，他把整卷砸在地上踩住，那半截也碎成了渣。',
-    '展开到第{e}轴，纸缝里钻出一只白蛾样的东西，他用铜尺把那一截压住，小指让翅粉烫起了泡。',
-    '捻到第{e}遍，卷尾的封蜡自己裂开，蹿出一只带爪的东西，他拿压书的石镇把它砸回去，虎口裂了一道。',
+    '纸缝里钻出一只白蛾样的东西，他用铜尺把那一截压住，小指让翅粉烫起了泡。',
+    '卷尾的封蜡自己裂开，蹿出一只带爪的东西，他拿压书的石镇把它砸回去，虎口裂了一道。',
   ],
   shelf: [
     '爬到第{e}层，高架上扑下来一只带爪的东西，他抱着横档挨了一记，后背让梯子磕青了。',
     '摸到第{e}回，顶层那排匣子后面盘着一条灰鳞的长虫，他拿火折子燎它，整排书都熏黑了。',
     '抽到第{e}格，书脊后面挤出一只灰壳的虫，他用册页夹住它，肩上让横档剐掉一块皮。',
-    '探到第{e}处，梁影里垂下一只带爪的东西，他举着油灯挡了一记，灯油泼了自己半边袖子。',
+    '梁影里垂下一只带爪的东西，他举着油灯挡了一记，灯油泼了自己半边袖子。',
   ],
   box: [
     '抬到第{e}只，箱底的锁自己弹开，窜出一只黑毛的兽，他拿绳子勒住它，手背上添了三道口子。',
     '捆到第{e}回，墙角那摞笼子塌下来，一只锈爪的东西从底下爬出，他把空笼扣过去压住，脚背也砸肿了。',
-    '抬到第{e}只，箱盖缝里挤出几根灰翅的虫，他把粗布蒙上去按住，手背上扎进三根木刺。',
-    '卸到第{e}处，箱底那层烂纸底下盘着一条黑鳞的长虫，他拿短刀挑开纸页，刀口在腿上划了一道。',
+    '箱盖缝里挤出几根灰翅的虫，他把粗布蒙上去按住，手背上扎进三根木刺。',
+    '箱底那层烂纸底下盘着一条黑鳞的长虫，他拿断剑挑开纸页，刃口在腿上划了一道。',
   ],
   book: [
     '翻到第{e}页，那个名字自己浮出来，灯影里站起一个亡者，他把册子砸过去，指缝里全是血。',
     '查到第{e}回，纸页间生出一只白蛾样的东西，他用火漆把那一页封死，手背让它的翅扫开一道口子。',
     '读到第{e}行，字自己挪了位，灯影里立起一个亡者，他把册子摔过去，手腕拧得生疼。',
-    '揭到第{e}处，纸背渗出一只灰白的蛾，他用铜镇纸把它摁在案上，指甲掀开半片。',
+    '纸背渗出一只灰白的蛾，他用铜镇纸把它摁在案上，指甲掀开半片。',
   ],
   ask: [
     '问到第{e}个人，巷子里那两个兜帽的把话头一断，掀翻了他的摊子，他挨了一棍，肋骨断了一根。',
-    '问到第{e}回，佣兵会门口那几个披甲的围上来，他退到街上才脱身，行囊让撕开了一道大口。',
-    '问到第{e}遍，巷子里那两个兜帽的把他按在墙上，他挨了两拳，嘴里全是血。',
-    '问到第{e}回，那两个人跟出巷口，他从人堆里挤出去，左眼肿得睁不开。',
+    '问到第{e}回，佣兵会门口那几个披甲的围上来，他退到街上才脱身，箱笼让撕开了一道大口。',
+    '巷子里那两个兜帽的把他按在墙上，他挨了两拳，嘴里全是血。',
+    '那两个人跟出巷口，他从人堆里挤出去，左眼肿得睁不开。',
   ],
   road: [
     '走到第{e}个岔口，桥头那两个拦路的把他堵住，他夺下其中一根棍子才冲过去，肩上挨了一记。',
@@ -4004,25 +4297,25 @@ export const HURT_PATCH = {
   compare: [
     '对到第{e}回，吟游诗人不肯认账，抽刀把那两张纸挑成碎片，他挡了一记，手背划开一道。',
     '核到第{e}遍，三家说法里有一家派人来封口，他在巷口挨了一拳，抄好的那份也让人抢走了。',
-    '对到第{e}遍，那伙兜帽的抽刀就劈，他挡下来，肩上还是挨了一记。',
-    '核到第{e}回，半路有人从背后一棍打翻他，怀里抄好的东西全让人夺走。',
+    '那伙兜帽的抽刀就劈，他挡下来，肩上还是挨了一记。',
+    '半路有人从背后一棍打翻他，怀里抄好的东西全让人夺走。',
   ],
   crew: [
-    '派出去的人挨了第{e}回打，回来时只剩两个，他往回背人的那一段路上，又挨了一记冷箭。',
-    '出去的第{e}队人没回来，他沿着血迹追进林子，跟一头白毛的巨兽缠斗一场，手臂上留下三道抓痕。',
-    '分出去的第{e}队人困在林子里，他摸进去接，让白毛的巨兽撵着摔进了一个雪坑。',
-    '他派去接应的第{e}路人进林子就没了动静，追进去的时候让埋伏的从树后一箭射穿小腿。',
+    '托出去的人第{e}回挨了打，他赶过去把人背回来，半路上又挨了一记冷箭。',
+    '第{e}趟托出去的人没回来，他沿着血迹追进林子，跟一头白毛的巨兽缠斗一场，手臂上留下三道抓痕。',
+    '第{e}趟托出去的人困在林子里，他摸进去接，让白毛的巨兽撵着摔进了一个雪坑。',
+    '他第{e}回进林子接应，进去就没了动静，让埋伏的从树后一箭射穿小腿。',
   ],
   route: [
-    '第三队走到第{e}个岔口上出了事，他赶过去时货散了一地，押队的人少了一个，他的腿上也挨了一箭。',
-    '分出去的第{e}路人让埋伏堵在桥上，他带人回头去接，只收回来半车东西，自己的左耳冻掉了一块。',
-    '第{e}路人走到桥心让埋伏截住，他赶去接应，车辕折断，他自己磕破了额角。',
-    '他派的第{e}队绕岔口走，半路撞上劫道的，他上前去夺，肩上挨了一记闷棍。',
+    '第三趟走到第{e}个岔口上出了事，他赶过去时货散了一地，押货的人少了一个，他的腿上也挨了一箭。',
+    '托出去的第{e}趟让人堵在桥上，他回头去接，只收回来半车东西，自己的左耳冻掉了一块。',
+    '第{e}趟走到桥心让埋伏截住，他赶去接应，车辕折断，他自己磕破了额角。',
+    '他托的第{e}趟绕岔口走，半路撞上劫道的，他上前去夺，肩上挨了一记闷棍。',
   ],
   poster: [
     '贴到第{e}张，悬赏上画的那只兽真的寻上门来，他把火把塞进它嘴里，胳膊上让它掀掉一块肉。',
     '贴出去第{e}天，一个戴兜帽的人来撕纸，两人在墙根动起手，他挨了一记冷刀。',
-    '贴到第{e}处，戴兜帽的那伙人寻到墙根来，他上前去挡，让一刀划开了半边下巴。',
+    '戴兜帽的那伙人寻到墙根来，他上前去挡，让一刀划开了半边下巴。',
     '贴满第{e}个村口，画上那只兽夜里寻上门来，他一把攥住它的前爪，腕子让它咬穿了。',
   ],
   chat: [
@@ -4038,7 +4331,7 @@ export const HURT_PATCH = {
     '讲到第{e}段，那伙要灭口的冲进来，他挨了一板凳，趁乱滚出门去。',
   ],
   greet: [
-    '搭到第{e}句，桥头那个兜帽底下不是人脸，他退了两步抽出短刀，肩头还是让它抓开了。',
+    '搭到第{e}句，桥头那个兜帽底下不是人脸，他退了两步抽出断剑，肩头还是让它抓开了。',
     '拱到第{e}回手，对面那伙赶车的翻了脸，他挨了一鞭，躲进树后才脱身。',
     '搭到第{e}句，那兜帽往桥栏上一靠，他按着肩头退到桥头的石墩后面。',
     '拱到第{e}回手，桥头那两个把斗篷一扯，他夺过一根鞭子才挣开，腿让套马绳拖了半条街。',
@@ -4076,7 +4369,6 @@ const OUT_PROPS = [
   ['断梁', 'beam'],
   ['碎瓦', 'tile'],
   ['哨棚', 'shed'],
-  ['更鼓', 'drum'],
   ['墙根', 'rampart'],
   ['石缝', 'crack'],
   ['符灯', 'lamp'],
@@ -4105,7 +4397,7 @@ let PROP_WORDS = [
   ['石台', 'bench'],
   ['石阶', 'bench'],
   ['酒馆', 'tavern'],
-  ['集市', 'market'],
+  ['货栈', 'market'],
   ['公会', 'guild'],
   ['灯', 'lamp'],
   ['纸', 'paper'],
@@ -4113,7 +4405,7 @@ let PROP_WORDS = [
   ['笔', 'pen'],
   ['窗', 'window'],
   ['门', 'door'],
-  ['茶', 'tea'],
+  ['汤', 'tea'],
   ['地图', 'map'],
   ['图', 'map'],
   ['路', 'road'],
@@ -4135,7 +4427,6 @@ let PROP_WORDS = [
   ['商队', 'market'],
   ['旅店', 'tavern'],
   ['行商', 'trader'],
-  ['货郎', 'trader'],
   ['吟游诗人', 'bard'],
   ['兜帽', 'cloak'],
   ['斗篷', 'cloak'],
@@ -4184,7 +4475,7 @@ function composeLine(entry, voice = DEFAULT_VOICE, recent = null) {
  * 地方 → 熟人。
  *
  * 用户 2026-10-07 第 2 条：「世界还是谁都不认识谁」——句子里早就出现过修书匠、守夜人、
- * 掌柜的，但那些人是**按句子随机撒的**，不住在任何地方：今天在咒文室碰上修书匠，
+ * 店主，但那些人是**按句子随机撒的**，不住在任何地方：今天在咒文室碰上修书匠，
  * 明天在法器坊又碰上他，读起来就是一群路人甲。
  *
  * 现在每个地方住一个**固定的**人：他到哪儿，碰上谁都是同一个。
@@ -4197,7 +4488,7 @@ export let CAST = {
   archive: '旧书贩子',
   market: '常来的行商',
   guild: '管悬赏板的老兵',
-  tavern: '掌柜的',
+  tavern: '店主',
 }
 
 /**
@@ -4230,7 +4521,7 @@ export let CAST_LINES = {
     '{p}把手上的活让给他，自己去喝水',
     '他蹲下来看{p}怎么下锤',
     '{p}跟他说这活急不得，差一点都不行',
-    '{p}把铁块翻过来给他看，说这是从灰烬之地捡回来的',
+    '{p}把铁块翻过来给他看，说这是从北边那片焦土里捡回来的',
   ],
   // 卷轴塔：旧书贩子，塔顶和没人翻过的那些
   archive: [
@@ -4238,7 +4529,7 @@ export let CAST_LINES = {
     '{p}跟他说那几摞早就没人翻过了',
     '他跟着{p}在里面绕了两圈',
     '{p}把最上面那格指给他看',
-    '{p}说顶层锁着的那几摞里，有半卷是在龙骨山脉画的',
+    '{p}说顶层锁着的那几摞里，有半卷是在霜脊山脉画的',
   ],
   // 打听铺：路上来的消息
   market: [
@@ -4246,7 +4537,7 @@ export let CAST_LINES = {
     '他问{p}最近外面好不好走',
     '{p}跟他说这趟不好走',
     '{p}把自己那边挪了挪，给他腾出一块地方',
-    '{p}刚从龙骨山脉那头过来，说那道口子雪封得早',
+    '{p}刚从霜脊山脉那头过来，说那道口子雪封得早',
   ],
   // 冒险者公会：悬赏板、出去的人
   guild: [
@@ -4254,7 +4545,7 @@ export let CAST_LINES = {
     '{p}跟他说往北那条道这两天没人敢走',
     '他跟{p}核了一遍出去的人',
     '{p}让他再等两天，人还没凑齐',
-    '{p}指着板上那张条子，说灰烬之地的事没人肯接',
+    '{p}指着板上那张条子，说北边那片焦土上的事没人肯接',
   ],
   // 酒馆：来往的人、靠里的位置
   tavern: [
@@ -4622,7 +4913,11 @@ function pickShards(entry, voice = DEFAULT_VOICE, recent = null) {
 function withIds(entries) {
   return (Array.isArray(entries) ? entries : []).map((entry, i) => {
     if (!entry || entry.id != null) return entry
-    return { ...entry, id: `anon-${Number(entry.startedAt) || i}` }
+    // 带上位置 i 当兜底：同一份演示数据里两条记录的 `startedAt` 常常一模一样（手写的样本、
+    // 同一次落盘切出来的两段），只按时间生成就会撞成同一个键——`prevOf` 把两行挤到一起，
+    // 「隔了一夜」那句就永远不出现（报告 B-11）。数组顺序对同一个调用方是稳定的，
+    // 所以两个调用方各跑一遍仍然得到同一组键。
+    return { ...entry, id: `anon-${Number(entry.startedAt) || 0}-${i}` }
   })
 }
 
@@ -4942,7 +5237,7 @@ let LIFE_POOLS = {
   morning: {
     adventure: [
       '天刚亮他就起来了，炉子上的水还没开。',
-      '他起得比营地里的人都早，先给马添了草。',
+      '他起得比左邻右舍都早，先把炉子生上。',
       '他把窗板推开，外面还蒙着一层白。',
       '他在灶上热了碗昨晚的汤，就着黑面包吃完。',
       '他把夜里晾在外头的靴子拿进来，鞋面上一层霜。',
@@ -4960,12 +5255,12 @@ let LIFE_POOLS = {
   // 这一段开始于 23 点后或 5 点前
   night: {
     adventure: [
-      '城里只剩他这一扇窗还亮着。',
+      '镇上只剩他这一扇窗还亮着。',
       '他添了两回灯油，还没打算睡。',
       '他把灯芯剪短了一截，屋里暗下去一点。',
       '风从北边过来，他往火盆里添了两块炭。',
       '他打了个哈欠，又把手边的活拿了回来。',
-      '外面的更声过了两遍，他还坐着没动。',
+      '外面的风声过去一阵，他还坐着没动。',
       '他把斗篷裹紧了些，炉子里的火已经矮下去。',
       '夜里起了风，窗子被吹得响，他起来扣紧了。',
       '他吹了灯又坐了一会儿，才摸黑躺下。',
@@ -4973,7 +5268,7 @@ let LIFE_POOLS = {
       '屋檐上滴着水，他听着听着又坐了起来。',
       '他把靴子摆在床边，省得明早摸黑找。',
       '他起身添了把柴，回来看见火又旺了。',
-      '塔上那口钟敲过一遍，他把案边的灯挑亮了些。',
+      '法师塔的钟敲过一遍，他把案边的灯挑亮了些。',
     ],
   },
   // 与上一段隔了 3–20 小时（正是你走开的时间）
@@ -4999,18 +5294,18 @@ let LIFE_POOLS = {
   // 与上一段隔了 20 小时以上
   overnight: {
     adventure: [
-      '隔了一夜，他又坐到老位置上。',
-      '中间隔了一天，桌上落了层薄灰。',
-      '隔了一夜，他把窗帘拉开，光重新落回桌上。',
-      '隔了一夜，桌上的茶凉了，他换了杯热的。',
-      '隔了一夜，屋里那股冷气还没散，他先添了柴。',
+      '再坐到那个位置时，桌上已经落了层薄灰。',
+      '回来时天已经放晴，他把窗板推开，光重新落回桌上。',
+      '桌上的汤凉了，他换了碗热的。',
+      '窗台上落了一层灰，他抹了一把。',
+      '院门被风顶得直响，他回来时先去把门掩上。',
+      '窗板上的霜化成水，滴在案子边沿。',
+      '隔了一夜，他把布帘挂回钩上，屋里那股冷气还没散，他先添了柴。',
       '中间隔了一天，他回来时门口堆着新落的雪。',
       '隔了一夜，他昨晚留下的那盏灯已经灭了。',
       '中间隔了一天，他把斗篷上的土抖干净才进来。',
       '隔了一夜，他先把炉子生上，才坐下。',
       '中间隔了一天，锅里的水早就凉透了。',
-      '隔了一夜，窗台上落了一层灰，他抹了一把。',
-      '中间隔了一天，他回来时院里那匹马先叫了一声。',
     ],
   },
   // 一口气坐下超过 150 分钟
@@ -5539,7 +5834,9 @@ export function worldLine(entry, voice = DEFAULT_VOICE, place = null, avoid = ''
  * 那天谁帮过他
  */
 export function helpersFor(entry) {
-  const n = (entry.helpers || []).length
+  // 导出的函数对 null 不设防：预览页、自检、以及别处手写的样本都可能传半截数据进来，
+  // 一个 `TypeError` 会把整块右栏连坐掉（报告 B-10）。
+  const n = (Array.isArray(entry?.helpers) ? entry.helpers : []).length
   // 写成汉字，不写阿拉伯数字：右栏（他那一栏）一个数字都不许有，
   // 数字全归左栏那几行「改文件 ×12」——这是这一版的分界线，自检里有一条红线盯着。
   return n ? `有${countWord(n)}个帮手还在外面。` : null
@@ -5553,9 +5850,12 @@ export function daylight(hour) {
   if (hour >= 8 && hour < 17) return { dusk: 0, glow: 0 }
   if (hour >= 17 && hour < 19) return { dusk: 0.3, glow: 0.45 }
   if (hour >= 19 && hour < 22) return { dusk: 0.55, glow: 0.85 }
-  if (hour >= 22) return { dusk: 0.78, glow: 1 }
+  // 2026-10-30 地图审计 M-12：深夜那层从前只有 0.78 × 0.45 = 0.351，黑得不彻底——
+  // 「深夜」看着像「傍晚晚一点」。现在 0.86，CSS 那边系数提到 0.52，合起来 0.447，
+  // 路灯那一圈也更收（见 renderStage 的 `nightR`）。
+  if (hour >= 22) return { dusk: 0.86, glow: 1 }
   if (hour >= 5) return { dusk: 0.45, glow: 0.6 }
-  return { dusk: 0.8, glow: 1 }
+  return { dusk: 0.86, glow: 1 }
 }
 
 /* ------------------------------------------------------------------ *
@@ -5765,12 +6065,22 @@ function buildMap(g) {
   //
   // 灌进这个 <g> 就完了——里面只有国名与地貌名两类文字，没有位图。红针、地名签、
   // 夜里那盏灯都是 buildStage 另外叠上去的：**地图不动，动的只有它们**。
+  //
+  // 2026-10-31（t28）：这 554 KB、两千多个形状的 innerHTML 解析，实测在挂载那一次要
+  // 260ms ParseHTML + 340ms EvaluateScript（trace 里就是这两个数），而挂载的时候面板
+  // 是 display:none 的——为一扇可能永远不开的门先付全价。现在面板那一路改成
+  // **第一次打开时才铺**（`buildStage({ deferMap: true })` + `stage.fillMap()`），
+  // 自检里那些直接调 `buildStage()` 的地方照旧立刻铺（默认不延后）。
   g.setAttribute('class', 'gf-map')
   g.innerHTML = MAP_SVG
 }
 
 /** 地图建一次；灯和那枚记号每次刷新时挪。 */
-export function buildStage() {
+export function buildStage(options) {
+  // 2026-10-31（t28）：`deferMap` 只给真面板用——地图那一坨等到第一次开门再灌，
+  // 见 buildMap 末尾那段注释。默认 false，自检里 `buildStage()` 的行为一个字没变。
+  const deferMap = !!(options && options.deferMap === true)
+
   // viewBox 就是内容本身，四周不留白——空白会按比例变成面板里的高度。
   //
   // 2026-10-05：用户说「地图的内容还是不够大，需要更大，也就是继续缩小比例」。
@@ -5782,8 +6092,10 @@ export function buildStage() {
 
   // 这张地图要有个名字，放大镜底下那层才能用 `<use>` 把它借过去——
   // 借的是同一份 DOM，**不复制一个字节**（镜内那 3 倍就是这么来的，零成本）。
-  const map = svgEl('g', { id: MAP_ID })
-  buildMap(map)
+  // 类名在这里就给上（2026-10-31，t28）：地图可以晚一点灌，但「图在这儿」这件事
+  // 从建的那一刻就得成立——`.gf-map` 是版面、图层与自检认它的唯一凭据。
+  const map = svgEl('g', { id: MAP_ID, class: 'gf-map' })
+  if (!deferMap) buildMap(map)
   svg.appendChild(map)
 
   // 提灯照地（2026-10-08，第四十二版）：夜罩用的那圈渐变。
@@ -5842,48 +6154,62 @@ export function buildStage() {
   // 补上反缩放之后，记号的位置与大小跟全图时**逐像素一样**：±3 个世界单位的偏移
   // × 1/3 × 23.09px 还是 ±23px，跟全图里的 ±3 × 7.697 一样。
   // 谁再想给它加位移，先把那两次报错看一遍。
+  // **2026-10-31（t29）：灯、记号、涟漪搬出了这张 SVG，住进下面那层 HTML（`live`）。**
+  // 原因见 CSS 里那段长注释：SVG 里的 transform / r 交给不了合成器，每帧改值就得把
+  // 那一层重新光栅一遍（8 秒空闲 1551ms，其中光环 990ms、记号 450ms）。
+  // 这一层（`overlay`）现在只留地名签——它是**静的**，从不改值，留在 SVG 里最省事：
+  // 位置跟着 viewBox 走，缩放也不会错位。
   const overlay = svgEl('g', { class: 'gf-overlay', id: OVERLAY_ID })
 
+  // 那一层 HTML：铺在面板里、盖在地图上面（`.gf-live` 的绝对定位与 `scale` 见 CSS）。
+  // 子元素的 px 全被外层 `transform: scale(每单位多少 px)` 解释成世界单位 ⇒ 下面
+  // 那些数字跟当年 SVG 里写的一模一样，不必换算。
+  const live = el('div', 'gf-live')
+  live.setAttribute('aria-hidden', 'true')
+
   // 他那儿亮着的那点光：天一黑就只有这一处是亮的。
-  // 位置和「亮不亮」放在外层（属性），会闪的那一层放在内层——
-  // **属性 transform / opacity 会被 CSS 动画整个盖掉**，两者同层的话，他出门了灯还亮着。
-  const glow = svgEl('g', { class: 'gf-lamp-glow' })
-  const flick = svgEl('g', { class: 'gf-lamp-flicker' })
-  // 尺寸是照着**世界单位**定的。地图的框从 93 个单位缩到 66 个之后，同样的世界单位
-  // 在面板里大了约 1.4 倍，所以这一整组（灯、记号、地名签）都按 0.71 缩了一轮——
-  // 不缩的话记号会比都城那座城堡还大。
-  flick.appendChild(svgEl('ellipse', { rx: 4.0, ry: 2.4, class: 'gf-lamp-glow-1' }))
-  flick.appendChild(svgEl('ellipse', { rx: 2.3, ry: 1.4, class: 'gf-lamp-glow-2' }))
-  flick.appendChild(svgEl('ellipse', { rx: 1.15, ry: 0.72, class: 'gf-lamp-glow-3' }))
+  // 位置和「亮不亮」放在外层，会闪的那一层放在内层——
+  // **CSS 动画的 opacity 会盖掉写在同一层上的 opacity**，两者同层的话，他出门了灯还亮着。
+  const glow = el('div', 'gf-live-lamp gf-lamp-glow')
+  const flick = el('div', 'gf-lamp-flicker')
+  // 尺寸是照着**世界单位**定的（仍是当年那三个同心椭圆：4.0×2.4 / 2.3×1.4 / 1.15×0.72）。
+  flick.appendChild(el('div', 'gf-lamp-glow-1'))
+  flick.appendChild(el('div', 'gf-lamp-glow-2'))
+  flick.appendChild(el('div', 'gf-lamp-glow-3'))
   glow.appendChild(flick)
-  overlay.appendChild(glow)
+  live.appendChild(glow)
 
   // 「他现在在这儿」那个记号。
-  // 2026-10-03：地图大了之后他人就不用画了——一枚记号更好认，也不用为一套动作准备美术。
-  // 尺寸是照着 96×54 的画布定的：面板里 360px 宽 → 1 格 ≈ 3.75px，所以记号大约 20px 高。
-  //
-  // **两层是必需的，不是讲究。** 记号的位置写在 `transform` 属性上，而「一起一落」是一条
-  // CSS 动画——CSS 的 transform 会整个盖掉属性上的 transform，两者落在同一个组上的话，
-  // 记号会被画到画布原点（左上角），而它整个朝上长，等于被裁掉。2026-10-03 就是这样：
-  // 自渲染管线照抄属性、图上是好的，真浏览器里那枚记号一直不存在，用户报「地图上看不到他在哪」。
-  const pin = svgEl('g', { class: 'gf-pin' })
-  const bob = svgEl('g', { class: 'gf-pin-bob' })
-  // 一圈会往外扩的光环，让记号在 360px 宽的地图上第一眼就能找到
-  bob.appendChild(svgEl('circle', { cx: 0, cy: -2.4, r: 1.05, class: 'gf-pin-ring', fill: 'none', stroke: 'var(--gf-seal)', 'stroke-width': 0.28 }))
-  bob.appendChild(svgEl('ellipse', { cx: 0, cy: 0.2, rx: 1.0, ry: 0.42, fill: 'var(--gf-ink)', 'fill-opacity': 0.28 }))
-  bob.appendChild(svgEl('circle', { cx: 0, cy: -2.4, r: 1.4, fill: 'var(--gf-seal)', 'fill-opacity': 0.16 }))
-  bob.appendChild(svgEl('polygon', { points: '0,-0.3 -0.7,-1.75 0.7,-1.75', fill: 'var(--gf-seal)' }))
-  bob.appendChild(svgEl('circle', { cx: 0, cy: -2.4, r: 0.74, fill: 'var(--gf-seal)' }))
-  bob.appendChild(svgEl('circle', { cx: 0, cy: -2.4, r: 0.27, fill: 'var(--gf-paper-hi)' }))
+  // **两层仍然是必需的**：外层（`.gf-pin`）写着位置与「亮不亮」，内层（`.gf-pin-bob`）
+  // 挂着一起一落的动画——CSS 的 transform 会整个盖掉外层写的位置（当年在 SVG 里
+  // 就是这个坑，2026-10-03 那枚记号被画到画布左上角、整个朝上长出画布）。
+  const pin = el('div', 'gf-live-pin gf-pin')
+  const bob = el('div', 'gf-pin-bob')
+  // 一圈会往外扩的光环，让记号在 360px 宽的地图上第一眼就能找到（动的是 scale，不是 r）
+  bob.appendChild(el('div', 'gf-pin-ring'))
+  // 图钉本身：一张内联的小 SVG，铺进来之后**再不改动**，光栅一次就够。
+  // viewBox 用的还是世界单位（-2..2 × -4.4..0.6），所以里面那几个形状一个字没改。
+  const glyph = svgEl('svg', { class: 'gf-pin-glyph', viewBox: '-2 -4.4 4 5', 'aria-hidden': 'true' })
+  glyph.appendChild(svgEl('ellipse', { cx: 0, cy: 0.2, rx: 1.0, ry: 0.42, fill: 'var(--gf-ink)', 'fill-opacity': 0.28 }))
+  glyph.appendChild(svgEl('circle', { cx: 0, cy: -2.4, r: 1.4, fill: 'var(--gf-seal)', 'fill-opacity': 0.16 }))
+  glyph.appendChild(svgEl('polygon', { points: '0,-0.3 -0.7,-1.75 0.7,-1.75', fill: 'var(--gf-seal)' }))
+  glyph.appendChild(svgEl('circle', { cx: 0, cy: -2.4, r: 0.74, fill: 'var(--gf-seal)' }))
+  glyph.appendChild(svgEl('circle', { cx: 0, cy: -2.4, r: 0.27, fill: 'var(--gf-paper-hi)' }))
+  bob.appendChild(glyph)
   pin.appendChild(bob)
-  overlay.appendChild(pin)
+  live.appendChild(pin)
 
   // 记号旁边那个地名。用户 2026-10-03：「地图上看不到他在哪，需要一个标注。」
   // 用 `<text>` 而不是 HTML 浮层：位置跟着记号走，不用自己算百分比，缩放也不会错位。
   // `font-size` 同样走属性不走 CSS——自渲染管线只认属性。
   const label = svgEl('g', { class: 'gf-place', opacity: '0' })
-  const labelBg = svgEl('rect', { class: 'gf-place-bg', rx: 0.7, height: 3.1, fill: 'var(--gf-paper-hi)', 'fill-opacity': 0.9, stroke: 'var(--gf-room-line)', 'stroke-width': 0.11 })
-  const labelText = svgEl('text', { class: 'gf-place-text', 'font-size': 2.1, fill: 'var(--gf-place-fg, var(--gf-fg))', 'dominant-baseline': 'middle' })
+  /* 界面审计 U15：这枚签从前比地图自己的城名大 1.7 倍（16.8px vs 9.7px），
+     底下还是一块 0.9 不透明的纸色实心块——在 1024 宽下它正好压住世界图那枚
+     「古林」城名签，只剩一个「林」露在外面，看着像字画坏了。
+     现在字号降到 1.75（≈14px，差 1.45 倍）、签底 0.72 让地形透一点；
+     记号的偏移（3.0）一个字没动——「靠右边翻到左边」那条断言咬的是它。 */
+  const labelBg = svgEl('rect', { class: 'gf-place-bg', rx: 0.7, height: 2.7, fill: 'var(--gf-paper-hi)', 'fill-opacity': 0.72, stroke: 'var(--gf-room-line)', 'stroke-width': 0.11 })
+  const labelText = svgEl('text', { class: 'gf-place-text', 'font-size': 1.75, fill: 'var(--gf-place-fg, var(--gf-fg))', 'dominant-baseline': 'middle' })
   label.appendChild(labelBg)
   label.appendChild(labelText)
   overlay.appendChild(label)
@@ -5931,7 +6257,7 @@ export function buildStage() {
   back.setAttribute('hidden', '')
 
   const stage = {
-    svg, map, overlay, overlaySvg, glow, pin, label, labelBg, labelText, night,
+    svg, map, overlay, overlaySvg, live, glow, pin, label, labelBg, labelText, night,
     zoom, zoomPan, zoomWorld, zoomLocal, zoomBit, zoomShot, mini, miniView, miniDot, back,
     // 在不在细节版、当前这扇窗（viewBox 的左上角）、已经画进去的那一扇。
     zoomOn: false,
@@ -5948,10 +6274,24 @@ export function buildStage() {
     // 记号画在哪儿（他脚下那块地）与那圈光池的半径。
     nightAt: null,
     nightR: 9,
+    // 2026-10-31（t29）：HTML 那一层（记号、涟漪、灯）钉在世界坐标的哪一点。
+    // 与 nightAt 同步写；placeLive 拿它算像素位置。
+    pinAt: null,
     // 取景框与屏幕上的位置：按下时读一次，之后一直用（见 zoomBox）。
     zoomBox: null,
     // 一.1：面板画过第一笔没有。第一次画的时候把他所在那一扇排进空闲队列（见 zoomWarm）。
     warm: false,
+    // 2026-10-31（t28）：地图那一坨灌进去了没有。默认值是「建的时候就灌」
+    // （自检里直接调 buildStage() 的地方就是这个值，行为一个字没变）；
+    // 真面板传 deferMap，于是这里一开始是 false，等第一次开门才灌。
+    mapBuilt: !deferMap,
+    // 第一次开门时才灌地图（只灌一次，之后每次开门零成本）。真灌了返回 true。
+    fillMap: () => {
+      if (stage.mapBuilt) return false
+      buildMap(map)
+      stage.mapBuilt = true
+      return true
+    },
   }
   // 全图点一下 → 进细节版（以点的那处为中心）；细节版按住拖 → 平移；
   // 双击 / Esc / 角落那颗「全图」→ 回全图（用户 m19416 定的四条）。
@@ -5971,10 +6311,51 @@ export function buildStage() {
       if (stage.zoomOn && ev && (ev.key === 'Escape' || ev.key === 'Esc')) zoomExit(stage)
     })
   }
-  // 丙那张位图**不在这里烘**（一.3）：它是一次 100–200ms 的活，而面板刚出现的那几秒
-  // 他正在看、正在读——真烘起来就是一次肉眼可见的卡。挪到「第一次进细节版」时再排
-  // （见 zoomEnter），那才是这张图真会被用到的时刻。
+  /* 界面审计 U3：这块地图本来是**纯鼠标**的——点一下进细节、按住拖、双击回来。
+     能动手却进不了 Tab 序列，键盘用户就完全够不着它（连「这里能点」都不知道）。
+     给它一个落脚点：tabindex + 名字 + 方向键（平挪 1/4 扇窗）、回车进细节版；
+     回全图那颗按钮本来是进入细节版之后才露面，键盘也能 Tab 到它。
+     「aria-hidden」要摘掉——一个能被聚焦、能按的东西不该对读屏隐身。 */
+  svg.removeAttribute('aria-hidden')
+  svg.setAttribute('tabindex', '0')
+  svg.setAttribute('role', 'application')
+  svg.setAttribute('aria-label', '地图：方向键挪动，回车进细节版，Esc 回全图')
+  svg.addEventListener('keydown', (ev) => {
+    const key = ev && ev.key
+    if (!key) return
+    if (key === 'Enter' || key === ' ') {
+      if (typeof ev.preventDefault === 'function') ev.preventDefault()
+      if (!stage.zoomOn) zoomEnter(stage, VIEW.x + VIEW.w / 2, VIEW.y + VIEW.h / 2)
+      return
+    }
+    if (key === 'Escape' || key === 'Esc') {
+      if (stage.zoomOn) zoomExit(stage)
+      return
+    }
+    if (zoomNudge(stage, key)) {
+      if (typeof ev.preventDefault === 'function') ev.preventDefault()
+    }
+  })
   return stage
+}
+
+/**
+ * 键盘挪地图（界面审计 U3）：方向键按 1/4 扇窗走一格，走法与拖动松手之后一样
+ * （`zoomSwap`：取景框夹在世界图里、吸附到 1/4 格、缓存命中就当场换）。
+ * 按的不是手势，没有「手还按着」这回事，但地方图那 36ms 的活还是让它晚一帧画
+ * （`ZOOM_HOLD_MS`），免得连按方向键时一帧里建好几张。
+ */
+function zoomNudge(stage, key) {
+  if (!stage.zoomOn) return false
+  const win = stage.zoomWin
+  if (!win) return false
+  const dx = key === 'ArrowLeft' ? -ZOOM_W / 4 : key === 'ArrowRight' ? ZOOM_W / 4 : 0
+  const dy = key === 'ArrowUp' ? -ZOOM_H / 4 : key === 'ArrowDown' ? ZOOM_H / 4 : 0
+  if (!dx && !dy) return false
+  const [wx, wy] = zoomOrigin(win[0] + ZOOM_W / 2 + dx, win[1] + ZOOM_H / 2 + dy)
+  if (win[0] === wx && win[1] === wy) return true // 已经贴到边上：吃下这一下，别让页面跟着滚
+  zoomSwap(stage, wx, wy, ZOOM_HOLD_MS)
+  return true
 }
 
 // 细节版的放大倍数。世界图 66×34、取景框 22×11.35——九分之一面积、三倍线性分辨率，
@@ -5982,6 +6363,9 @@ export function buildStage() {
 // 差 0.15%，肉眼看不出来，就用同一个 3。
 // **它只用来算记号那一层的反缩放**：真正的放大是换 viewBox 换出来的，不是 scale。
 const ZOOM_K = 3
+// HTML 那一层量到的「面板有多宽」最多信这么久（毫秒）。开门那一帧面板还会变窄
+// （见闻录的滚动条随后才出现），量早了记号就偏一个多像素——300ms 之后重新量一次。
+const LIVE_BOX_TTL = 300
 // 细节版那扇窗，跟面板上的地方图是同一扇（`src/map/local.js` 的 WIN_W / WIN_H）。
 const ZOOM_W = 22.0
 const ZOOM_H = 11.35
@@ -6177,6 +6561,77 @@ function zoomOrigin(cx, cy) {
   ]
 }
 
+/**
+ * HTML 那一层（记号、涟漪、灯）的世界→像素换算（2026-10-31，t29）。
+ *
+ * 它不在 SVG 里，viewBox 变了就得自己算。两件事分开算：
+ *   ① 位置按**当前**这一档（细节版是 3 倍，记号跟着地面一起走）；
+ *   ② 大小按**全图**那一档（`u = 面板宽 / VIEW.w`）。细节版的 viewBox 只有三分之一宽，
+ *      大小要是也按那一档放大，记号会大出三倍、看上去像「他离开了自己站的地方」
+ *      （2026-10-08 用户报过）；从前靠给那一层写反缩放，现在直接把大小钉死在全图那一档。
+ *
+ * 自检那套最小 DOM 垫片没有 `getBoundingClientRect`，`clientWidth` 给的是 350
+ * （见 smoke.mjs 里 PXU / PXZ 那两个常数）；两边都取不到就按「不换算」退。
+ */
+function liveScale(stage) {
+  const svg = stage && stage.svg
+  const clock = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
+  const box0 = stage && stage.liveBox && clock - stage.liveBox.at < LIVE_BOX_TTL ? stage.liveBox : null
+  let w = box0 ? box0.w : 0
+  let h = box0 ? box0.h : 0
+  // 量一次就记住一小会儿：拖动那一路每帧都要问位置，`getBoundingClientRect` 是布局读，
+  // 每帧读一次会把刚写下去的样式逼着当场结算（见 zoomBox 那段同一个道理）。
+  // 但**记不了太久**：2026-10-31（t29）第一次量它的时候，面板还在开门那一帧，
+  // 见闻录的滚动条随后才占掉五个多像素，宽度从 508 变成 502 却没重新量，
+  // 记号就偏出去一个多像素（t29 的位置探针抓到的）。所以再加一个 300ms 的上限，
+  // 并让面板在尺寸变化时（ResizeObserver）当场清掉这个缓存。
+  if (!box0) {
+    if (svg && typeof svg.getBoundingClientRect === 'function') {
+      const box = svg.getBoundingClientRect()
+      w = Number(box && box.width) || 0
+      h = Number(box && box.height) || 0
+    }
+    if (!w) w = Number(svg && svg.clientWidth) || 0
+    if (!h) h = w ? w * (VIEW.h / VIEW.w) : 0
+    if (stage && w) stage.liveBox = { w, h, at: clock }
+  }
+  const vb = String((stage && stage.overlaySvg && stage.overlaySvg.getAttribute('viewBox')) || '')
+    .trim()
+    .split(/\s+/)
+    .map(Number)
+  const ok = vb.length === 4 && vb.every((v) => Number.isFinite(v))
+  const vw = ok && vb[2] > 0 ? vb[2] : VIEW.w
+  const vh = ok && vb[3] > 0 ? vb[3] : VIEW.h
+  return {
+    x0: ok ? vb[0] : VIEW.x,
+    y0: ok ? vb[1] : VIEW.y,
+    sx: w ? w / vw : 0,
+    sy: h ? h / vh : 0,
+    u: w ? w / VIEW.w : 0,
+  }
+}
+
+/** 把那一层挪到他脚下那块地（`pinAt`）。拖动中 `ddx/ddy` 是地面平移的那一段。 */
+function placeLive(stage, ddx = 0, ddy = 0) {
+  const live = stage && stage.live
+  const at = stage && stage.pinAt
+  if (!live || !at) return
+  const s = liveScale(stage)
+  const x = (at[0] - s.x0 + ddx) * s.sx
+  const y = (at[1] - s.y0 + ddy) * s.sy
+  const u = s.u > 0 ? s.u : 1
+  // 写一次就是一次样式重算：他站着不动时那串字一个字节都不变，挡掉。
+  const key = `${x.toFixed(2)}|${y.toFixed(2)}|${u.toFixed(4)}`
+  if (key === stage.liveKey) return
+  stage.liveKey = key
+  live.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) scale(${u.toFixed(4)})`
+  // 灯在记号上方一个世界单位，记号本身贴在门口再往上 0.3（都是当年 SVG 里那两个数）。
+  stage.glow.style.transform = 'translate3d(0, -1px, 0)'
+  stage.pin.style.transform = 'translate3d(0, -0.3px, 0)'
+  // 自检要知道记号钉在哪：世界坐标直接记在元素上（HTML 没有 transform 属性，别去咬那个）。
+  stage.pin.setAttribute('data-at', `${at[0].toFixed(1)},${at[1].toFixed(1)}`)
+}
+
 /** 把这扇窗写进 viewBox，并把小全图上那个框、那个点跟着挪。 */
 function zoomSetWin(stage, wx, wy) {
   stage.zoomWin = [wx, wy]
@@ -6212,6 +6667,8 @@ function zoomOverlay(stage, ddx = 0, ddy = 0) {
   const p = stage.nightAt
   if (!stage.zoomOn || !p) {
     stage.overlay.removeAttribute('transform')
+    // 2026-10-31（t29）：记号、涟漪、灯在 HTML 那一层，viewBox 回了全图也要跟着回去。
+    placeLive(stage)
     return
   }
   // 拖动中（`ddx/ddy` 非零）记号、地名签、提灯要跟地面一起走：位移写在最外面，
@@ -6221,6 +6678,8 @@ function zoomOverlay(stage, ddx = 0, ddy = 0) {
   setAttr(stage.overlay, 'transform', `${head}translate(${f2(p[0])} ${f2(p[1])}) scale(${1 / ZOOM_K}) translate(${f2(-p[0])} ${f2(-p[1])})`)
   setAttr(stage.miniDot, 'cx', f2(p[0]))
   setAttr(stage.miniDot, 'cy', f2(p[1]))
+  // 地名签留在 SVG 里，靠上面那个反缩放；记号与灯在 HTML 里，自己按 viewBox 重算一次。
+  placeLive(stage, ddx, ddy)
 }
 
 /**
@@ -6288,6 +6747,7 @@ function zoomExit(stage) {
   stage.zoomBit.removeAttribute('data-on')
   // 退出时把「拖动中」那个类摘掉（也可能是在拖动里按 Esc / 双击出去的）。
   if (stage.overlaySvg) stage.overlaySvg.setAttribute('class', 'gf-overlay-svg')
+  if (stage.live) stage.live.setAttribute('class', 'gf-live')
   zoomFrameDrop(stage)
   // 一张地方图 800 KB，不看了就别占着。
   stage.zoomLocal.innerHTML = ''
@@ -6477,9 +6937,12 @@ function zoomMove(stage, ev) {
   if (!d.moved && Math.abs(d.dx) + Math.abs(d.dy) > 0.06) {
     d.moved = true
     zoomDragging = true
-    // 真拖起来才按停记号那三处动画（见 CSS 里 `.gf-overlay-svg.gf-zooming` 那段）：
+    // 真拖起来才按停记号那三处动画（见 CSS 里 `.gf-zooming` 那六条）：
     // 拖动这两秒在满负荷重画世界图，不能再叠上记号自己的动画。
+    // 2026-10-31（t29）：记号那三处搬进 HTML（`.gf-live`）之后不再住在这张 SVG 里，
+    // 所以这个类两边都挂——按停的规矩对哪一边都能生效。
     if (stage.overlaySvg) stage.overlaySvg.setAttribute('class', 'gf-overlay-svg gf-zooming')
+    if (stage.live) stage.live.setAttribute('class', 'gf-live gf-zooming')
   }
   if (!d.moved) return
   if (stage.zoomAt) {
@@ -6568,6 +7031,7 @@ function zoomUp(stage, ev) {
   zoomFrameDrop(stage)
   // 手一松就让记号那三处动画接着走（拖动中按停的，见 CSS 里那段）。
   if (stage.overlaySvg) stage.overlaySvg.setAttribute('class', 'gf-overlay-svg')
+  if (stage.live) stage.live.setAttribute('class', 'gf-live')
   if (!d || !stage.zoomOn) return
   if (ev && ev.pointerId != null && typeof stage.svg.releasePointerCapture === 'function') {
     try {
@@ -6835,13 +7299,18 @@ function walk(from, to, ms, onFrame) {
  * 而插件挂上来的那一刻正好是 DSH 自己在启动的时候，收着时没人看得见那扇图。
  */
 export function renderStage(stage, narration, voice = DEFAULT_VOICE, fromPlace = null, warm = true) {
+  // 面板可能刚改过宽窄：那一层（HTML）的尺寸缓存清掉，下一次 placeLive 重新量。
+  stage.liveBox = null
   // 用户 2026-10-08（逐字）：「角色必须一直显示在地图上。」所以位置认不出来的时候
   // **不再把记号收起来**——退回落脚处（`home`），至少他还在图上、还有个名字。
   // 一个地点都没有的薄世界包（地理四件套全不给）才会走到 `!at`，那时候连地图都没有。
   const at = PLACES[narration.place] || PLACES.home
   const on = at ? '1' : '0'
-  stage.glow.setAttribute('opacity', on)
-  stage.pin.setAttribute('opacity', on)
+  // 2026-10-31（t29）：灯与记号现在是 HTML 元素，亮不亮走 `style`（原来是属性）。
+  // 属性 opacity 在 HTML 上不起作用，写成属性只会让「他出门了灯还亮着」这种老毛病
+  // 变成一次沉默的失效——自检里那几条读的也是 style。
+  stage.glow.style.opacity = on
+  stage.pin.style.opacity = on
   if (!at) {
     stage.pin.removeAttribute('data-place')
     stage.pin.removeAttribute('data-from')
@@ -6851,16 +7320,19 @@ export function renderStage(stage, narration, voice = DEFAULT_VOICE, fromPlace =
   }
 
   const paint = (px, py) => {
-    stage.glow.setAttribute('transform', `translate(${px.toFixed(1)} ${(py - 1.0).toFixed(1)})`)
-    stage.pin.setAttribute('transform', `translate(${px.toFixed(1)} ${(py - 0.3).toFixed(1)})`)
+    stage.pinAt = [px, py]
+    // 记号与灯的位置换算写在 placeLive 里（它同时管「细节版里大小不跟着放大」那件事）。
+    // 灯在记号上方一个世界单位，记号本身贴在门口再往上 0.3——都在 placeLive 里加。
+    placeLive(stage)
     // 提灯照地（第四十二版）：那圈光池的中心就是他的脚下，半径随时辰收放——
-    // 傍晚（dusk 0.3）铺到 8.6 个世界单位，深夜（0.78）只剩 7 出头。
+    // 傍晚（dusk 0.3）铺到 8.6 个世界单位，深夜只剩 6 出头（2026-10-30 地图审计 M-12：
+    // 夜里天黑得彻底了，光池也不能还照那么远，不然「深夜」跟「傍晚」一个样）。
     // 圆心是**他脚下那块地**（`nightAt`），**不跟「记号画在哪儿」走**：记号本来就画在
     // 那里，甲案之后它哪儿都不去（见上面 `.gf-overlay` 那段）。`setAttr` 再把同值写入
     // 挡掉——换地方、换时辰才真写下去；他走起来的时候每帧都在算，但只有位置真变了
     // 的那几帧才落笔。
     const dusk = daylight(narration.hour).dusk
-    const nightR = 9.5 - 3.0 * dusk
+    const nightR = 9.2 - 4.0 * dusk
     stage.nightAt = [px, py]
     stage.nightR = nightR
     setAttr(stage.night, 'cx', f2(px))
@@ -6888,17 +7360,25 @@ export function renderStage(stage, narration, voice = DEFAULT_VOICE, fromPlace =
         stage.label.setAttribute('opacity', '0')
       } else {
         // 字宽只能估：这台机器量不了文本。中日韩按整字宽算，够用。
-        const fs = 2.1
-        const w = name.length * fs + 1.5
-        const flipX = px + 3.0 + w > VIEW.x + VIEW.w - 1.0
-        const x = flipX ? px - 3.0 - w : px + 3.0
-        const y = py < VIEW.y + 5 ? py + 0.9 : py - 4.6
+        // （字号见上面 U15：1.75，与 labelText 的 font-size 是同一个数）
+        // 2026-10-30 M-4：落点交给 `placeLabel()`——四个方向各试一次，挑压得最少的，
+        // 压的是图上真有的那些字与记号（世界图自己那块牌子用的是同一条 `plate_rect`）。
+        // 字号统一走 `PLACE_FS`：1.75 时十三枚里有十枚压在图上别的字上，1.6 时剩两枚；
+        // 挤不下时 `placeLabel` 还会再收一档，返回的第五项就是实际用的那个字号。
+        const fs = PLACE_FS
+        const rect = placeLabel(px, py, name, fs, VIEW)
+        const size = rect[4] || fs
+        const x = rect[0]
+        const y = rect[1]
+        const w = rect[2] - rect[0]
         stage.label.setAttribute('opacity', '1')
         stage.labelBg.setAttribute('x', x.toFixed(1))
         stage.labelBg.setAttribute('y', y.toFixed(1))
         stage.labelBg.setAttribute('width', w.toFixed(1))
-        stage.labelText.setAttribute('x', (x + 0.7).toFixed(1))
-        stage.labelText.setAttribute('y', (y + 1.55).toFixed(1))
+        stage.labelBg.setAttribute('height', (rect[3] - rect[1]).toFixed(1))
+        stage.labelText.setAttribute('x', ((rect[0] + rect[2]) / 2).toFixed(1))
+        stage.labelText.setAttribute('font-size', size.toFixed(2))
+        stage.labelText.setAttribute('y', (y + size * 1.37).toFixed(1))
         stage.labelText.textContent = name
       }
     }
@@ -7315,7 +7795,7 @@ function forkStartCell(units, todayFrom) {
 /**
  * 这一天的**每一段**，按时刻从旧到新：日卷收进去的那些段（`dayUnit.list`）＋ 屏幕上还铺着的那几格。
  *
- * 命运那一层要按这一份算**整天的账**（见 `forksFor` 与 `pendingPin`）。只看屏幕上那几格是不够的：日卷收进去的
+ * 命运那一层要按这一份算**整天的账**（见 `forksFor` 与它那枚钉子）。只看屏幕上那几格是不够的：日卷收进去的
  * 段才是这一天的大半，少了它们，「这一天走过哪些景」就只剩最近半小时，命运永远只压得下来在
  * 最新那一格上——屏幕上就永远看不出「停住了」（用户 m17334 逮到的就是这个）。
  */
@@ -7387,8 +7867,13 @@ function forkDayFacts(rows) {
  *
  * 命运挂在**日卷**那一行上（`forksFor` 只认 `unit.tier === 'day'`），而日卷要等这一天最早那一段
  * 过了半小时才成形——所以钉的那一格至少落在那一刻之后，它那一行上才有一行日卷可站。
+ *
+ * **它住在哪一个实例里**（报告 B-09 之后顺手收掉的债，队长第 5 条）：从前这是一个模块级的
+ * `let pendingPin = null`，于是同一个页面上开两块面板（预览页 + 真面板、自检里连着 mount 几个）
+ * 会共用同一枚钉子——这边钉在 14:00、那边画出来也停在 14:00，两块屏幕互相拽。现在它由
+ * `createGameflow()` 造一个 holder（`{ value: null }`）自己拿着，`forksFor` 只往里读写、
+ * `renderTimeline` 原样递下去：一个实例一枚钉子，页面重开一次照样重新钉。
  */
-let pendingPin = null // { day, id, at }
 
 /**
  * 这一件「命运」是在**哪一格**上起头的（`momentsFor` 的 `live` 用它，用户 m14810 第 5 条）。
@@ -7540,7 +8025,10 @@ function pickedForkRoad(fork, entry, choices) {
  * `seq` 这个参数留着只为跟 `momentsFor` 同一个调用形状：这一层**一个字的景都不借它**——
  * 借了就会跟着折叠状态变，命运会忽有忽无（见 `forkStep`）。
  */
-function forksFor(units, seq, choices = null, now = null, canPick = false) {
+function forksFor(units, seq, choices = null, now = null, canPick = false, pin = null) {
+  // 没给钉子就自己造一枚：`forksFor` 是内部函数，敢直接调它的地方（自检、预览页）不该拿到
+  // 半路崩掉的结果——只是那一枚钉子活不过这一次调用，跟从前「模块级」的区别正是我们要的。
+  const hold = pin || { value: null }
   const out = new Map()
   const result = { map: out, live: null, death: null }
   const table = Array.isArray(FORKS) ? FORKS : []
@@ -7556,27 +8044,27 @@ function forksFor(units, seq, choices = null, now = null, canPick = false) {
     // 「哪一件」按**当下这一份账**判（用户 m18547 第 1 条）。两样例外：
     //   · 已经定下来的那一件，从存下的挑法里**找回来**——不然账一长，「哪一件」会换人，
     //     用户挑过的那一件就白挑了；
-    //   · 已经压下来还没定的那一件，钉在 `pendingPin` 上不重算（见上）。
+    //   · 已经压下来还没定的那一件，钉在 `hold.value` 上不重算（见上）。
     const chosen = choices
       ? table.find((one) => one && Array.isArray(one.roads) && pickedForkRoad(one, unit.entry, choices))
       : null
-    const pinned = pendingPin && pendingPin.day === Number(unit.from)
-      ? table.find((one) => one && one.id === pendingPin.id) || null
+    const pinned = hold.value && hold.value.day === Number(unit.from)
+      ? table.find((one) => one && one.id === hold.value.id) || null
       : null
     const fork = chosen || pinned || rulesForkOf(facts, FORKS, { outdoors: OUT_KEYS })
     if (!fork) continue
     const roads = Array.isArray(fork.roads) ? fork.roads : []
     if (roads.length < 2) continue
     const picked = pickedForkRoad(fork, unit.entry, choices)
-    if (picked && pendingPin && pendingPin.id === fork.id) pendingPin = null
+    if (picked && hold.value && hold.value.id === fork.id) hold.value = null
     const pending = canPick && !picked && unit.from === todayFrom
     if (pending) {
       // 停在**它压下来那一刻**——那一刻就是「当下」：第一次看见它的时候，屏幕上最新那一行
       // （用户 m18547 第 1 条）。钉住之后不重算、不跟着时钟漂（第 2 条；用户 m17334：
       // 「中间所有的内容，都暂停」）。
-      const at = pendingPin && pendingPin.id === fork.id
-        ? pendingPin.at
-        : (pendingPin = { day: Number(unit.from), id: fork.id, at: Number(rows[rows.length - 1].at) }).at
+      const at = hold.value && hold.value.id === fork.id
+        ? hold.value.at
+        : (hold.value = { day: Number(unit.from), id: fork.id, at: Number(rows[rows.length - 1].at) }).at
       // 那一刻落在哪一行上：今天**不晚于它**的最新那一行（格或日卷）。
       // 这里**不许留 `null`**——`Number(null)` 是 `0`，会把整条梯子滤空（2026-10-10 撞过一次）。
       const on = units
@@ -7590,7 +8078,7 @@ function forksFor(units, seq, choices = null, now = null, canPick = false) {
         at,
         // 那一刻：`renderTimeline` 拿它把整块面板按那一刻重画一遍，`refresh` 拿它把地图
         // 也停在同一刻上（用户 m17334）。走到这儿那一刻一定是个真数——它是屏幕上最新那一行的
-        // 时刻（`pendingPin`），**更不能落成 `0`**（`Number(null)` 是 0，见上面那一句）。
+        // 时刻（`hold.value`），**更不能落成 `0`**（`Number(null)` 是 0，见上面那一句）。
         freeze: at,
         fork,
         roads,
@@ -7804,8 +8292,10 @@ export function dayPlanOf(roll, list, seq, journey = JOURNEY) {
 export function dayPlansFor(units, seq, journey = JOURNEY) {
   const out = new Map()
   if (!journey) return out
+  // 同 `helpersFor`：导出函数，外面可能传 null 进来（自检、预览页）。
+  const list = Array.isArray(units) ? units : []
   const byDay = new Map()
-  for (const unit of units) {
+  for (const unit of list) {
     const day = dayOfUnit(unit)
     if (!byDay.has(day)) byDay.set(day, [])
     byDay.get(day).push(unit)
@@ -7815,7 +8305,7 @@ export function dayPlansFor(units, seq, journey = JOURNEY) {
   // 收下，剩下那些天再拿卡兜底。顺序也重要：`out` 按天去重，先到先得。
   const rolls = []
   const cards = []
-  for (const unit of units) {
+  for (const unit of list) {
     if (unit.roll === true) {
       if (unit.tier === 'day') rolls.push(unit)
     } else if (unit.grid !== true) {
@@ -8005,10 +8495,17 @@ function clashOf(unit, picked) {
  * 于是序曲与「隔了一夜」按老规矩从记录里自己数——自检里那些夹具正是这么喂的。
  */
 function readStore(next) {
-  if (Array.isArray(next)) return { records: next, since: 0, seam: null }
+  if (Array.isArray(next)) return { records: next, since: 0, seam: null, dayStart: 0 }
   const records = next && Array.isArray(next.records) ? next.records : []
   const seam = next && next.seam && Number(next.seam.startedAt) ? next.seam : null
-  return { records, since: Number(next && next.since) || 0, seam }
+  return {
+    records,
+    since: Number(next && next.since) || 0,
+    seam,
+    // 8 → 9：按下「开始冒险」那一刻（用户 m04200）。没按过 / 老存档是 0，
+    // 那时退回「今天零点」的老规矩（见 renderTimeline）。
+    dayStart: Number(next && next.dayStart) || 0,
+  }
 }
 
 /* 开场那一下（用户 m01903 第 1 条）：一台上什么都没有的机器上，先摆一颗「开始冒险」；
@@ -8019,7 +8516,13 @@ function readStore(next) {
    也没有内存可记的时候——不该摆一颗按了没反应的按钮）。 */
 function paintStart(listEl, meta, now) {
   const dayFrom = startOfDay(now)
-  const started = Number(meta && meta.started) === dayFrom
+  // 8 → 9：「今天开过场没有」在宿主给了整份存档的场合只认 `dayStart`（见 refresh 里的
+  // `dayStartKnown`）。本地那枚 `meta.started` 是 8 时代的旧账——升级当天它写着今天、
+  // 存档里却没有 `dayStart`，若拿它当数，这里就只铺那两条说明、连按钮都不给了，
+  // 人再也没法重新开场（用户 m04200：他要的就是「点开之后按下那一下才开始算」）。
+  const started = meta && meta.dayStartKnown
+    ? Number(meta.dayStart) > 0 && startOfDay(Number(meta.dayStart)) === dayFrom
+    : Number(meta && meta.started) === dayFrom
   const canPress = !started && !!(meta && typeof meta.onStart === 'function')
   if (!started && !canPress) return
   const box = el('div', 'gf-start-box')
@@ -8034,16 +8537,23 @@ function paintStart(listEl, meta, now) {
   listEl.appendChild(box)
 }
 
-function renderTimeline(listEl, entries, now, voice = DEFAULT_VOICE, narration = null, picks = null, meta = null, frozenAt = null, live = null) {
+function renderTimeline(listEl, entries, now, voice = DEFAULT_VOICE, narration = null, picks = null, meta = null, frozenAt = null, live = null, forkPin = null) {
   listEl.textContent = ''
+  listEl.classList.remove('gf-list-before-start')
   // 缺 id 的记录先补上临时 id（见 withIds）：见闻录靠 id 找上一行与这一行的句子。
   const all = withIds(entries)
   // 上一段（`seam`）只为了「隔了一夜」那一句而混进来：它比今天早，下面的过滤会把它挡在
   // 见闻录外面，**只有 `prevOf` 看得见它**。旧日子真删之后，记录里问不到「上一段」了，
   // 所以宿主在删之前把它的起止记下来（见 src/index.js 的 pruneStore）。
   if (meta && meta.seam && Number(meta.seam.startedAt)) {
+    // `seam: true` 是给自己看的记号（报告 B-09）：它**只**参与下面 `prevOf` 那次比较，
+    // 绝不铺成一行。宿主的 `pruneStore` 保证 `seam.endedAt` 在昨天以前，可存档是别人写的、
+    // 老版本也写过——万一这条落到了今天，只按时刻过滤就会把它当一张记录铺出来：
+    // 抬头一行「10:00 – 10:00 · 不到一分钟」，左栏空着、右栏一句安静话，还跟着多算一次
+    // 岔口（`units` 一变，命运那一对选项就重算）。那不是他的日子，是裁剪留下的接缝。
     all.push({
       id: 'seam',
+      seam: true,
       startedAt: Number(meta.seam.startedAt),
       endedAt: Number(meta.seam.endedAt) || Number(meta.seam.startedAt),
       minutes: 0,
@@ -8058,28 +8568,57 @@ function renderTimeline(listEl, entries, now, voice = DEFAULT_VOICE, narration =
   // `all` 留着不扔，只给 `prevOf` 用：今天第一行上面那句「隔了一夜」说的正是它跟昨天末一行的
   // 距离，把它一起裁了，每天的头一行就变成凭空起头。
   const todayFrom = startOfDay(now)
-  entries = all.filter((entry) => Number(lastEnded(entry)) >= todayFrom
-    || landedStamp(Number(entry?.startedAt) || 0) >= todayFrom)
+  // 8 → 9：今天从**按下「开始冒险」那一刻**算起（用户 m04200）。没有它（没按过、老存档、
+  // 预览页）就退回「今天零点」这条老规矩——那时行为与从前一字不差。
+  const dayStart = Number(meta && meta.dayStart) || 0
+  const floorFrom = dayStart > 0 && startOfDay(dayStart) === todayFrom ? dayStart : 0
+  const edge = floorFrom || todayFrom
+  // `entry.seam !== true`：接缝不是记录（见上面 `all.push` 那一段）。
+  entries = all.filter((entry) => entry.seam !== true
+    && (Number(lastEnded(entry)) >= edge
+      || landedStamp(Number(entry?.startedAt) || 0) >= edge))
+  // 起点之前就结束的不铺，第一格之前的格子推到下一格（见 clipToStart）。
+  entries = clipToStart(entries, floorFrom, now)
 
   if (!entries.length) {
     // 空的时候只说明状态，不邀请、不催促——**只有一台刚开机的机器例外**：
     // 那一天他还没按过「开始冒险」，就先摆那一颗（用户 m01903 第 1 条，见 paintStart）。
     listEl.appendChild(el('p', 'gf-empty', '他还没走过多远。'))
     paintStart(listEl, meta, now)
-    return { remark: null, when: null }
+    return { remark: null, when: null, pending: 0 }
   }
 
-  // 开场那一下（用户 m01903 第 1 条、用户 m19006）：**每天第一次打开都要有这一下**，
-  // 不论今天有没有已经落下的活。从前它只长在上面空态那一支上，傍晚才打开面板的人
-  // 就永远看不见那颗按钮（用户 m19006 逐字：「今天我打开，并没有让我点击开始冒险呢，
-  // 直接就是一个，命运选择？」）。按过之后那两条说明照旧只挂在空态那一支上
-  // （挂到「今天第一个五分钟格落盘」），所以这里补的只是「今天还没按过」那一种。
+  // 开场那一下（用户 m01903 第 1 条、用户 m19006、用户 m19218）：**每天第一次打开都要有这一下**，
+  // 不论今天有没有已经落下的活。从前它只长在上面空态那一支上，傍晚才打开面板的人就永远
+  // 看不见那颗按钮（用户 m19006 逐字：「今天我打开，并没有让我点击开始冒险呢，直接就是一个，
+  // 命运选择？」）。
   //
-  // 这一天还没开始讲，**命运就不摆出来**（用户 m19006 第 2 问：「上面是开始冒险的点击，
-  // 下面又是命运…」）：按过之后才轮到它（见下面 `canPick`）。行本身照旧铺——左栏是
-  // **你的日常**，它不该被这道幕布挡住（用户 m18735「左侧是用户的"你的日常"不能停」）。
-  const startedToday = Number(meta && meta.started) === startOfDay(now)
-  if (!startedToday) paintStart(listEl, meta, now)
+  // 而这道幕布盖的是**整条见闻录**（用户 m19218 逐字：「你看今天我并没有点开始冒险，却有如此
+  // 显示」）——今天的账是真的（上午就在干活），可这一天还没开始讲：按下之前一格都不铺，只摆
+  // 那一颗；按下之后照常从第一格讲起。命运与门上那枚记号认同一个判据（见下面的 `canPick`
+  // 与 `refreshBadge`）。
+  //
+  // 从前我只把「命运」挡在后面、行照旧铺，理由是用户 m18735 那句「左侧是用户的"你的日常"
+  // 不能停」——那句话说的是**命运压下来**那一刻（停的只是右栏），不是这一天开头：还没开场
+  // 的一天，左栏也不是「停」，是还没到。
+  //
+  // 没有存储、也没有内存可记（`meta.onStart` 不是一个函数）、或者面板根本记不住
+  // （`picks.canSave` 假，比如预览页 `storage: null`）的时候不设这道幕布——摆一颗按了
+  // 没反应的按钮，比照旧铺着更坏；预览页要看的也正是「铺开之后」的样子。
+  // 8 → 9：「今天开过场」有两个来源——宿主存档里的 `dayStart`（按下那一刻，权威），
+  // 和本地那枚 `meta.started`（老规矩）。**宿主在场时只认 `dayStart`**（`meta.dayStartKnown`）：
+  // 本地那枚是 8 时代的旧账，它记的是「按下过按钮」，不是「这一天从哪儿开始」。
+  // 升级当天正是这个区别最要紧的时候：本地标记是今天、存档里却还没有 `dayStart` ⇒
+  // 认旧账就会把按下之前那几行又铺出来（用户 m04200 报的就是这个）。
+  const startedToday = floorFrom > 0
+    || (!(meta && meta.dayStartKnown) && Number(meta && meta.started) === todayFrom)
+  const canCurtain = !!(picks && picks.canSave) && !!(meta && typeof meta.onStart === 'function')
+  if (!startedToday && canCurtain) {
+    listEl.classList.add('gf-list-before-start')
+    paintStart(listEl, meta, now)
+    // `curtain` 给 `refresh` 看：两栏的抬头也一起收起来（那两栏都是空的，只剩一个抬头很奇怪）。
+    return { remark: null, when: null, curtain: true, pending: 0 }
+  }
 
   // 一行 = 五分钟一格（用户 2026-10-08 第 2 条；老记录没有 ticks，退化成一张卡一行）。
   // 今天最近半小时一格一格，今天更早的那几段收成一卷，**再往前一概不讲**（见 foldLadder）。
@@ -8104,7 +8643,7 @@ function renderTimeline(listEl, entries, now, voice = DEFAULT_VOICE, narration =
     // 今天还什么都没记（记录都是昨天的）：跟「一次都没记过」同一句话，不催、不请。
     listEl.appendChild(el('p', 'gf-empty', '他还没走过多远。'))
     paintStart(listEl, meta, now)
-    return { remark: null, when: null }
+    return { remark: null, when: null, pending: 0 }
   }
   // 方向与比例（见 `DIRECTIONS`）：一天朝哪边走。**先算这个再拼句子**——危险系数与
   // 「外头」那层都读 `entry.direction`，所以要赶在 `sequenceOfUnits` 造句子之前挂上。
@@ -8141,7 +8680,7 @@ function renderTimeline(listEl, entries, now, voice = DEFAULT_VOICE, narration =
   // 命运（见 `FORKS` 与 `forksFor`，用户 m16528 第 1 条「这种选择，不叫命运」）：这一天压下来的
   // 那一件大事、两条路各是什么、他落的是哪一种结果。**只有这一层摆选项**，也只有这一层会停住。
   // 它跟高光事件同一份 `seq`、同一份按天的账，所以「屏幕上那件事」与「这一件命运」永远配套。
-  const forkHits = forksFor(units, seq, choices, now, canPick)
+  const forkHits = forksFor(units, seq, choices, now, canPick, forkPin)
   const forkMap = forkHits.map
   // 屏上正摆着的那一对选项（2026-10-10 按用户 m14810 第 5 条改过）：它长在**这一件命运起头的
   // 那一格**那一行上（见 forkCellOf），而且**只要没定就一直摆着**。
@@ -8321,6 +8860,10 @@ function renderTimeline(listEl, entries, now, voice = DEFAULT_VOICE, narration =
   return {
     remark: nowRemark,
     when: nowWhen,
+    // **唯一的事实**（用户 m04298）：屏幕上真摆出来了几对可点的选项（`.gf-choice-live`）。
+    // 它是在下面那圈 `for` 里、`rowFor` 真把按钮建出来之后才 +1 的（见 `row.choicePicks`），
+    // 不是先算一个「应该有」再指望它出现。门上那枚记号只认这个数（见 `paintDoorBadge`），
+    // 「记号亮着」与「按钮在」于是同生同死。
     pending,
     openRow,
     openFork,
@@ -8380,13 +8923,18 @@ function rowFor(unit, voice = DEFAULT_VOICE, nowKey = null, now = Date.now(), pr
   // 「此刻」那一行是例外：老记录那张卡写的是**现在**（见下面 row.whenText 与 tickClock）。
   // 系统钟往回跳过时区间会倒着写，所以那种时候只写起点。
   const start = landedStamp(entry.startedAt)
-  const span = (stamp) => (stamp > start
-    ? `${clockText(start)} – ${clockText(stamp)}`
-    : clockText(start))
+  // 跨午夜的区间要写清终点是**哪一天**：老记录没有格子、只有首末两个时刻，
+  // 「昨天 23:30 – 00:00」读起来像是倒着走了半小时（报告 B-06）。同一天照旧只写钟点
+  // ——抬头前半句已经把日子说过了。
+  const span = (stamp) => {
+    if (!(stamp > start)) return clockText(start)
+    if (startOfDay(stamp) === startOfDay(start)) return `${clockText(start)} – ${clockText(stamp)}`
+    return `${clockText(start)} – ${dayText(stamp, now)} ${clockText(stamp)}`
+  }
   const whenText = grid
     ? `${dayText(unit.at, now)} ${clockText(unit.at)}`
     : (isNow
-      ? `今天 ${span(now)} · ${durationText(landedMinutes(liveMinutes(entry, now)))}`
+      ? `${dayText(entry.startedAt, now)} ${span(now)} · ${durationText(landedMinutes(liveMinutes(entry, now)))}`
       : unit.roll
         // 一卷：头半句按档位说（日卷「昨天」，月卷「7 月」，年卷「2025 年」——见 rollLabel）。
         // 日卷还写首末两个钟点；周/月/年卷不写钟点，只留合计时长——「7 月 14:00 – 14:35」
@@ -8404,7 +8952,7 @@ function rowFor(unit, voice = DEFAULT_VOICE, nowKey = null, now = Date.now(), pr
   // 只有「此刻」那一行跟着走（其余行的时刻是过去的事实，见 renderTimeline）。
   row.whenEl = whenEl
   row.whenText = (stamp) => (!grid && isNow
-    ? `今天 ${span(stamp)} · ${durationText(landedMinutes(liveMinutes(entry, stamp)))}`
+    ? `${dayText(entry.startedAt, now)} ${span(stamp)} · ${durationText(landedMinutes(liveMinutes(entry, stamp)))}`
     : whenText)
   row.isNow = isNow
 
@@ -8437,8 +8985,8 @@ function rowFor(unit, voice = DEFAULT_VOICE, nowKey = null, now = Date.now(), pr
   }
   const names = []
   const rawFiles = grid
-    ? [...(tick?.files || []), ...(head ? entry.deliverables || [] : [])]
-    : [...(entry.files || []), ...(entry.deliverables || [])]
+    ? [...listOf(tick?.files), ...(head ? listOf(entry.deliverables) : [])]
+    : [...listOf(entry.files), ...listOf(entry.deliverables)]
   for (const raw of rawFiles) {
     const name = String(raw).split(/[\\/]/).pop()
     if (name && !names.includes(name)) names.push(name)
@@ -8830,6 +9378,10 @@ export function createGameflow(options = {}) {
     // 语气：案牍还是冒险。同一份记录，换的是他那边的名词。
     voice = DEFAULT_VOICE,
     loadRecords = async () => [],
+    // 8 → 9：按下「开始冒险」时**通知宿主**（`(at) => Promise<boolean>`，见 src/index.js 的
+    // `POST /dsh-gameflow/start`）。不传（预览页、自检里那些夹具）就只记在本地那枚标记上，
+    // 行为跟从前一样——那颗按钮在这些地方本来也按不出什么结果来。
+    startSession = null,
     container = document.body,
     // 时间的接缝：问候语、屋里的光、他此刻在干什么，全都读它。
     // 留着是为了测试能钉死「现在是几点」，不然一到傍晚断言就会飘。
@@ -8867,8 +9419,14 @@ export function createGameflow(options = {}) {
    *   · `seam`——**上一段**（最近那一条被删掉的坐下来的那一段）的起止。
    *     今天第一行上面那句「隔了一夜」认它，不然每天的头一行都是凭空起头。
    * 两个都不是「日子」，是接缝：留着不算「保存过去的事」。
+   *
+   * 8 → 9 又多了一个 `dayStart`：按下「开始冒险」那一刻（用户 m04200）。它不是接缝，
+   * 是「今天从哪儿开始讲」——`renderTimeline` 只铺它之后的格子（见 clipToStart）。
    */
-  let archive = { since: 0, seam: null }
+  let archive = { since: 0, seam: null, dayStart: 0, dayStartKnown: false }
+  // 命运「压下来那一刻」那枚钉子（见 `forksFor` 的头注）：**一个实例一枚**，从前它是
+  // 模块级的 `pendingPin`，同一个页面上两块面板会互相拽（报告里那条设计债）。
+  const forkPin = { value: null }
   // 岔口挑过的那些（2026-10-08 晚加的，用户 m10670 第 2 条：「我要的交互选项在哪？」）。
   // 跟挑说法**同一个存储、另一个键**：挑的是「哪一天、哪件事、走哪条路」，记在本地，
   // **不写 `records.json`**——记录里仍然只有他真做的事（这是这个插件的底线）。
@@ -8918,25 +9476,59 @@ export function createGameflow(options = {}) {
   function startedOn() {
     return Number(readStarted(store)) || startedMemory
   }
+  /**
+   * 按下「开始冒险」。8 → 9 起它不只是「记下按过」（用户 m04200）：
+   * **按下那一刻就是这一天的起点**，所以先通知宿主把起点记进存档、
+   * 把之前攒的记录删掉，**成了之后**才掀幕布（本地那枚标记、按钮换说明、重画）。
+   *
+   * 没连上（宿主那条路由没成、或这儿根本没有传输层）就什么都不做：
+   * 按钮留着、再按一下——宁可让他多按一次，也不能让幕布先掀开、
+   * 底下却还是「按下之前的那一天」。
+   */
   function pressStart(btn) {
-    const dayFrom = startOfDay(now())
-    startedMemory = dayFrom
-    writeStarted(store, dayFrom)
+    const at = now()
+    const dayFrom = startOfDay(at)
     // 先把按钮就地换成那两条说明：重画是异步的，不这样会先闪一下空。
-    const box = btn && btn.parentNode
-    if (box) {
-      btn.remove()
-      for (const text of START_HINTS) box.appendChild(el('div', 'gf-hint', text))
+    const commit = () => {
+      startedMemory = dayFrom
+      writeStarted(store, dayFrom)
+      const box = btn && btn.parentNode
+      if (box) {
+        btn.remove()
+        for (const text of START_HINTS) box.appendChild(el('div', 'gf-hint', text))
+      }
+      if (mounted) Promise.resolve(refresh()).catch(() => { /* 重画失败不该把面板弄崩 */ })
     }
-    if (mounted) Promise.resolve(refresh()).catch(() => { /* 重画失败不该把面板弄崩 */ })
+    if (typeof startSession !== 'function') {
+      commit()
+      return
+    }
+    if (btn && 'disabled' in btn) btn.disabled = true
+    Promise.resolve(startSession(at)).then((ok) => {
+      if (!mounted) return
+      if (!ok) {
+        if (btn && 'disabled' in btn) btn.disabled = false
+        if (btn) btn.title = '没连上，稍后再按一下'
+        return
+      }
+      commit()
+    }, () => {
+      if (btn && 'disabled' in btn) btn.disabled = false
+      if (btn) btn.title = '没连上，稍后再按一下'
+    })
   }
   // 屏幕上第一条还等着挑的那一行（门上那枚惊叹号点一下就落到它那儿，见 jumpToOpenFork）。
   let openRowEl = null
   // 那一对选项本身：惊叹号点一下要把**它**摆到滚动框正中（用户 m12444 第 2 条）。见 jumpToOpenFork。
   let openForkEl = null
+  // 上一次**真画出来**、屏幕上正摆着的那几对选项（`renderTimeline` 交回来的 `pending`）。
+  // 这是门上那枚记号的唯一来源（用户 m04298）：记号不自己算，只读它。
+  let drawnPending = 0
   let isOpen = false
   let mounted = false
   let closeTimer = 0
+// 开门之后「等面板排完版再量一次」的那一下（见 setOpen 打开那一支）。
+let liveSettleTimer = 0
   // 鼠标移开之后一秒自动收。用户 2026-10-06 第 1 条定的是两秒（「移走 2 秒就消失」），
   // 2026-10-07 第 3 条嫌慢：「2 秒之后自动关闭太慢了，改为 1 秒」。
   // 写成函数声明是为了提升：`setOpen` 定义在前面，却要调 `cancelLeave`。
@@ -8973,6 +9565,12 @@ export function createGameflow(options = {}) {
     }
   }
   let observer = null
+  // 系统深色偏好的那条查询（界面审计 U11）：mount 时挂上，destroy 时摘掉。
+  let schemeWatch = null
+  const onSchemeChange = () => {
+    if (!mounted) return
+    retheme()
+  }
   // 「此刻」那一行的抬头节点 + 「现在该写什么」。面板开着时每分钟重写一次（见 tickClock）。
   let nowWhen = null
   // 量尺寸：开关由宿主回答一次，之后每次刷新版面都量一遍（防抖）。
@@ -9022,13 +9620,34 @@ export function createGameflow(options = {}) {
 
   // 最上面就是地图，地图下面才是字。
   const stage = el('div', 'gf-stage')
-  const stageHandle = buildStage()
+  // 2026-10-31（t28）：地图那一坨（554 KB、两千多个形状）**等到第一次开门再灌**
+  // ——挂载那会儿面板是 display:none，灌进去谁也看不见，白付 260ms 解析 + 340ms 脚本，
+  // 而 DSH 每次启动/刷新页面都要付一遍。为什么不是「挂上之后的空闲时刻灌」（另一条路）：
+  // 宿主常在流式生成，空闲时刻可能被饿到用户正在读的那一刻才来，那才是真的卡；
+  // 而且面板默认收起，多数启动根本不打开它——为一扇可能永远不开的门先付全价不划算。
+  // 开门是用户自己按的，代价放在这里正好，配一行「正在铺开地图…」，不是白屏。
+  const stageHandle = buildStage({ deferMap: true })
   stage.appendChild(stageHandle.svg)
   // 灯、记号、地名签那张**自己的** SVG（用户 m23060 报记号一卡一卡 ⇒ m23080 批甲）：
   // 它跟地图那张盖在同一块地方、同一套世界坐标，但**自己成一层**——记号上下动只重画这一小层，
   // 不用每帧重画地图上那 5817 个形状（实测：光滑动画在整张地图里 1909ms，搬到这张里 587ms）。
   // 它也得绝对定位在地图上，所以同样挂在 `.gf-stage` 上。
   stage.appendChild(stageHandle.overlaySvg)
+  // 2026-10-31（t29）：记号、涟漪、灯那一层是 HTML（见 buildStage 里的 `live`）。
+  // 它必须挂在 `.gf-stage` 这个定位容器里，盖在两张 SVG 上面——但 `pointer-events`
+  // 在 CSS 里关掉了，点击照旧落到下面的地图上。
+  stage.appendChild(stageHandle.live)
+  // 面板一变宽窄，那一层「一个世界单位等于多少像素」就得重新量（见 LIVE_BOX_TTL 那段）。
+  // 自检那套最小垫片没有 ResizeObserver，所以有就用、没有就靠那 300ms 的保质期兜住。
+  let stageWatch = null
+  if (typeof ResizeObserver === 'function') {
+    stageWatch = new ResizeObserver(() => {
+      stageHandle.liveBox = null
+      stageHandle.liveKey = ''
+      placeLive(stageHandle)
+    })
+    stageWatch.observe(stageHandle.svg)
+  }
   // 角落那张小全图与「全图」按钮（用户 m19416 定的第四、第二条）：
   // 它们要绝对定位在地图上，所以得挂在 `.gf-stage` 上、跟 svg 做兄弟。
   stage.appendChild(stageHandle.mini)
@@ -9042,6 +9661,12 @@ export function createGameflow(options = {}) {
   pinBtn.setAttribute('aria-label', '始终显示')
   pinBtn.appendChild(pinSvg())
   stage.appendChild(pinBtn)
+
+  // 第一次开门那一下，地图还没铺好：这行字先顶上（见 setOpen 里那段 afterPaint）。
+  // 它是**文字**不是空框——「正在铺开」读起来像他正在把地图摊开，不像坏了。
+  const stageNote = el('div', 'gf-stage-note', '正在铺开地图…')
+  stageNote.hidden = true
+  stage.appendChild(stageNote)
 
   // 状态块：一行说完「此刻 · 几点 · 他在哪儿」。
   // 原来这里是「时间 / 位置」两行标签加两行值（标签文案是 2026-10-03 定的）。
@@ -9302,6 +9927,12 @@ export function createGameflow(options = {}) {
   colsHead.appendChild(el('span', 'gf-col-him', '他的冒险'))
   colsHead.hidden = true
   const timeline = el('div', 'gf-timeline')
+  /* 界面审计 U4：记录多的时候这一栏要自己滚，可它只是一个 div（没有 tabindex）——
+     键盘用户推到面板里，焦点从上面那张地图直接跳到下面那些按钮，**永远滚不动这一栏**。
+     给它一个落脚点、说清它是什么；浏览器对带 tabindex 的滚动容器本来就认方向键/翻页键。 */
+  timeline.setAttribute('tabindex', '0')
+  timeline.setAttribute('role', 'region')
+  timeline.setAttribute('aria-label', '今天记下的那些事（可以滚动）')
 
   room.appendChild(stage)
   room.appendChild(nowBox)
@@ -9322,12 +9953,56 @@ export function createGameflow(options = {}) {
   /**
    * DSH 用 `body[data-ds-dark-theme]` 表示深色。shadow DOM 里选不到 body，
    * 所以这里把「现在是深色吗」读成一个布尔，用来挑色板。
+   *
+   * 界面审计 U11：从前只认那个属性，宿主哪天改成跟着系统走、不再写属性，面板就永远
+   * 停在亮色（用户开着系统深色，面板白得刺眼）。现在是三道闸，**宿主说什么最优先**：
+   *   ① 有 `data-ds-dark-theme` → 深色（这是宿主的明话，永远算数）；
+   *   ② 没有的话，看宿主自己的底色（`<html>` 的 background-color），暗的算深色——
+   *      「宿主没表态」多半就是「跟着系统走」，而系统深色时页底通常已经是暗的；
+   *   ③ 还读不出来，才问 `prefers-color-scheme`。
+   * 这样「亮色宿主 + 深色系统」不会被我们自作主张染黑（②会把它判成亮），
+   * 而「宿主不表态 + 系统深色」终于也能暗下来。
    */
   function isDark() {
     const body = document.body
-    if (!body) return false
-    if (typeof body.hasAttribute === 'function') return body.hasAttribute('data-ds-dark-theme')
-    return 'data-ds-dark-theme' in (body.attributes || {})
+    if (body) {
+      const on = typeof body.hasAttribute === 'function'
+        ? body.hasAttribute('data-ds-dark-theme')
+        : 'data-ds-dark-theme' in (body.attributes || {})
+      if (on) return true
+    }
+    // ② 宿主自己的底色（读不到就是 null，不猜）
+    const hostDark = hostBackgroundDark()
+    if (hostDark !== null) return hostDark
+    // ③ 系统偏好
+    try {
+      const mq = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-color-scheme: dark)')
+        : null
+      if (mq) return mq.matches === true
+    } catch (e) {
+      // 垫片里没有 matchMedia，当作亮色
+    }
+    return false
+  }
+
+  /** `<html>` 的底色是不是暗的。读不出来（垫片、透明）返回 null——「不知道」，别瞎猜。 */
+  function hostBackgroundDark() {
+    try {
+      if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return null
+      const el = document.documentElement
+      if (!el) return null
+      const raw = String(getComputedStyle(el).backgroundColor || '')
+      const hit = raw.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?/i)
+      if (!hit) return null
+      // 透明 = 这层没画底色，读不出「宿主的暗」
+      if (hit[4] != null && Number(hit[4]) < 0.5) return null
+      // 按人眼权重算亮度（0 黑 255 白）
+      const lum = 0.2126 * Number(hit[1]) + 0.7152 * Number(hit[2]) + 0.0722 * Number(hit[3])
+      return lum < 128
+    } catch (e) {
+      return null
+    }
   }
 
   function applyTheme() {
@@ -9356,6 +10031,20 @@ export function createGameflow(options = {}) {
   }
 
   /**
+   * 换一套皮（换主题 / 系统亮暗变了）：重铺色板，再重画一遍。
+   * 这一趟**不浮字**（界面审计 U6，见 typeInto 里的 quietType）——
+   * 只是颜色变了，那句话不该从头再演一遍。
+   */
+  function retheme() {
+    applyTheme()
+    quietType = true
+    const done = refresh()
+    const off = () => { quietType = false }
+    Promise.resolve(done).then(off, off)
+    return done
+  }
+
+  /**
    * 把「他此刻在干什么」那句话一个字一个字浮出来。
    *
    * 一个字一个 span，靠 CSS 的 animation-delay 错开——不是真的打字，
@@ -9366,12 +10055,20 @@ export function createGameflow(options = {}) {
    * 2026-10-05：这一句不再单独占地图下面那一行，它落在见闻录最新一行的右栏里
    * （`renderTimeline` 把那个节点交回来），所以「就是现在」那行和被顶替掉的那句
    * 不再是两处重复，只有一处。
+   *
+   * 界面审计 U6：换主题 / 系统深色变了一下，整块面板会重排，这一行的节点是新的
+   * （空的）⇒ 同一句话又从第一个字开始浮 2.7 秒，用户只是换了套颜色，画面却像重新
+   * 讲了一遍。所以给「换皮」这一类刷新一个开关（`quietType`）：这一类重画只把字落进去，
+   * 不浮。**推开门那一次不算**——那时候他是刚坐下，浮一遍正是要的效果。
    */
+  let quietType = false
   function typeInto(node, text) {
     if (!node || typeof text !== 'string') return
     // 面板开着的时候每五分钟会重排一次，句子里只要还是这句话就别重放动画——
     // 那句话每分钟原地重浮一次，比停住更让人分心。
     if (node.textContent === text) return
+    // 换皮引起的重画：字照落，不浮（见上面 U6 那段）
+    if (quietType) { node.textContent = text; return }
     node.textContent = ''
     Array.from(text).forEach((ch, i) => {
       const span = el('span', 'gf-type')
@@ -9388,6 +10085,16 @@ export function createGameflow(options = {}) {
    *
    * 数的是**屏幕上还摆着几条没挑的岔口**：有就亮一枚惊叹号小圆牌、门缝里的光也一直亮着。
    * 关着门也看得见——不然得先推开门才知道里面有没有事。
+   *
+   * 2026-10-31（用户 m04298 第 2 条）把语义钉死在这里：
+   *
+   *   **亮 = 有一处命运正等你决定，且见闻录为此停住。** 三件事同生同死——
+   *   记号亮着、屏幕上真摆着一对可点的选项、见闻录不再往下铺新行。
+   *
+   * 所以这个数**只能有一个来源**：`renderTimeline` 真把 `.gf-choice-live` 建出来之后
+   * 数出来的那个 `pending`（见它的返回处）。本函数不再算、也不许别处再算一遍——
+   * 从前 `refreshBadge` 自己走一趟折叠梯子，闸门与画面对不上，就出现过
+   * 「门上有感叹号，推开门却没有选项」与「记号亮着，可那一挑早跑完了。」（同一条反馈）。
    *
    * `canSave` 是同一道闸（用户 m11602 第 1 条：「这个标记没有作用」）：面板记不住的时候
    * （预览页、自检里没给 storage）**一个记号都不亮**——那时候面板里根本不摆选项，亮了就是骗人。
@@ -9465,12 +10172,31 @@ export function createGameflow(options = {}) {
   }
 
   /**
-   * 面板收着的时候只重算门上那枚记号：重读一次记录、走一遍折叠梯子，数没挑的岔口。
-   * 走的是跟 `refresh()` 同一套机器（`rowUnits` → `sequenceOfUnits` → `momentsFor`），
-   * 所以门上的数和推开门之后屏幕上摆着的选项**一定是同一个数**。
+   * 面板收着的时候重算门上那枚记号——**它不自己算，它照见闻录那台机器真画一遍、读它的数**。
+   *
+   * 用户 m04298 第 2 条把这件事定成一条规矩：
+   * 「当有感叹号的时候，意味着有一个命运选择的时候需要用户来做出，界面会一直停在这个地方
+   * 等待用户做出选择，否则不会有新的落盘。」——所以：
+   *
+   *   **记号亮着 ⇔ 屏幕上真摆着一对可点的选项，且见闻录为此停住。**
+   *
+   * 从前这里自己走一趟 `rowUnits` → `forksFor` 再数 `today.live`，那是**第二份判定**。
+   * 两份判定的闸门不一样（这里不认「今天按过开始冒险没有」，也不认幕布），于是出现过
+   * 「门上有感叹号，推开门却一个选项都没有」（用户 m04298 报的正是它）。现在只留一处：
+   * `renderTimeline` 把「真画出几对 `.gf-choice-live`」当唯一事实交回来（`pending`），
+   * 这里照着它画——画在离屏的一份容器里，要的只是那个数。
+   *
+   * 面板开着的时候连这一遍都省了：`refresh` 画完就把数记在 `drawnPending` 里，读它即可。
+   * 两处读的是同一个数，所以「门收着」与「推开门」不会各说各的。
    */
   async function refreshBadge() {
     if (!mounted) return
+    // 面板开着：记号只认上一次**真画出来**的那一份（屏幕上的按钮就是那个数）。
+    if (isOpen) {
+      paintDoorBadge(drawnPending)
+      refreshBadgeSeen()
+      return
+    }
     let next = null
     try {
       next = loadRecords()
@@ -9478,22 +10204,38 @@ export function createGameflow(options = {}) {
     } catch {
       next = null
     }
-    const store = readStore(next)
-    // 顺手把 `entries` 与那两个标量换新：下一次 `refresh()` 之前，手上不该是一份更旧的记录。
-    archive = { since: store.since, seam: store.seam }
-    entries = store.records
-    const units = rowUnits(store.records, now())
-    const seq = sequenceOfUnits(units, voiceId)
-    // 数的是「屏上正摆着的那一对选项」：今天、还没定过、真有两条路（见 forksFor 的 `live`）。
-    // 这一处和屏幕上画出来的那一对**同一个来源**，不会两处打架。
-    // 2026-10-10（用户 m14810 第 5 条）：没定下来就**一直**亮着——它现在是挡住往下讲的东西，
-    // 不再是「五分钟之内可以挑一挑」。`picks.canSave` 照旧递进去（记不住就不摆也不亮）。
-    // 今天已经死了就**一定不亮**（用户 m16548）：他没有明天要挑了，门上也就不该有记号。
-    // 幕布（2026-10-19，用户 m19006）：今天还没按过「开始冒险」，见闻录里什么都不铺，
-    // 门上那枚记号也就不该先亮起来——两处得说同一句话（同一个 `startedOn()`）。
-    if (startedOn() !== startOfDay(now())) { paintDoorBadge(0); return }
-    const today = forksFor(units, seq, picks.map, now(), !!picks.canSave)
-    paintDoorBadge(today.death || !today.live ? 0 : 1)
+    // 同 refresh()：读不到就保留上一份，别把门上那枚记号闪没（报告 B-08）。
+    if (next !== null) {
+      const store = readStore(next)
+      // 顺手把 `entries` 与那几个标量换新：下一次 `refresh()` 之前，手上不该是一份更旧的记录。
+      // 这里必须跟 `refresh` 记下同样的几样（`ledger` / `started` / `onStart`）：少一样，
+      // 画出来的那一遍就跟真画面不是同一份（幕布尤其要看 `onStart`）。
+      archive = {
+        since: store.since,
+        seam: store.seam,
+        dayStart: store.dayStart,
+        // 宿主给的整份存档带着 `version`（见 refresh 里同一处判断）：那时「开过场」只认 `dayStart`。
+        dayStartKnown: Boolean(next && !Array.isArray(next) && 'version' in next),
+        ledger: readLedger(store),
+        started: startedOn(),
+        onStart: pressStart,
+      }
+      entries = store.records
+    }
+    const real = now()
+    const stamp = landedNow(real)
+    // 岔口挑过的那几条先读出来：手里那份 `picks.map` 要是旧的，「已经挑过」就会算成
+    // 「还没挑」——记号亮着，可那一挑早跑完了（用户 m04298 第 2 条后半句）。不依赖时序。
+    picks.reload()
+    const narration = narrationFor(entries, stamp, voiceId)
+    // 离屏画一遍：要的是它的 `pending`（屏幕上真摆出来的那几对选项），不是版面。
+    // 用 `renderTimeline` 同一台机器，所以这一遍算出来的东西就跟推开门看到的一模一样。
+    const probe = document.createElement('div')
+    const shown = renderTimeline(probe, entries, stamp, voiceId, narration, picks, archive, null, null, forkPin)
+    openRowEl = shown.openRow || null
+    openForkEl = shown.openFork || null
+    drawnPending = shown.pending || 0
+    paintDoorBadge(drawnPending)
   }
 
   async function refresh() {
@@ -9513,10 +10255,27 @@ export function createGameflow(options = {}) {
       // 读不到就当没有——陪伴类插件不该因为自己坏了而打扰用户。
       next = null
     }
-    const store = readStore(next)
+    const fresh = next === null ? null : readStore(next)
+    // 读不到（`loadRecords` 交回 null，见 fetchStore）时**别当成空存档**：一瞬间的网络抖动
+    // 会把见闻录擦成「他还没走过多远。」，下一次刷新又长回来——闪一下白屏（报告 B-08）。
+    // 保留上一份，画还是照画（钟点、地图、此刻那句都跟着走）。
+    const store = fresh || {
+      records: entries,
+      since: archive?.since || 0,
+      seam: archive?.seam || null,
+      dayStart: archive?.dayStart || 0,
+    }
+    // 宿主给的整份存档（GET /records）带着 `version`；夹具 / 老写法给的数组或手写对象没有。
+    // 两种「按过没有」要分开：**宿主在场时只认 `dayStart`**——本地那枚标记是 8 时代的旧账，
+    // 它记的只是「按下过这颗按钮」，不是「这一天的起点」。升级当天尤其要紧：本地标记是今天、
+    // 存档里却没有 `dayStart`，那时若认旧账，他打开就又看见按下之前的那些行（用户 m04200）。
+    const fromHost = Boolean(fresh && next && !Array.isArray(next) && 'version' in next)
     archive = {
       since: store.since,
       seam: store.seam,
+      // 8 → 9：按下「开始冒险」那一刻（见 renderTimeline 的 clipToStart）。
+      dayStart: store.dayStart,
+      dayStartKnown: fromHost,
       // 册子上的进度（用户 m16552）：序曲**只在第一天讲**——「第一天」认的就是这个。
       // 按过指印、死过，都算这本书已经开过头了（见 LEDGER_STORE_KEY）。
       ledger: readLedger(store),
@@ -9551,7 +10310,7 @@ export function createGameflow(options = {}) {
     //     是当下这个时间点的），它一定晚于这一天第一段半小时，日卷一定在，这条才立得住。
     //   · 边界取 `<=`：**把命运顶起来的那一张卡自己要留着**（起手就在那一刻上的卡也留着），
     //     不然这一遍算出来这一件命运根本还没成立。
-    let shown = renderTimeline(timeline, entries, stamp, voiceId, narration, picks, archive)
+    let shown = renderTimeline(timeline, entries, stamp, voiceId, narration, picks, archive, null, null, forkPin)
     const frozenAt = shown.freeze !== null && Number(shown.freeze) < Number(stamp)
       ? Number(shown.freeze) : null
     // 「此刻」那一句、地图上那个记号、左上角那个地名，都跟着同一条线走。
@@ -9568,7 +10327,7 @@ export function createGameflow(options = {}) {
       // 第九个参数是**当下那一份**（`{ entries, now }`）：停住那一刻之后你干的活照旧一行一行
       // 往下铺（用户 m18735「左侧是用户的"你的日常"不能停」）——那几行只建左栏，见 `rowFor`
       // 的 `muted` 与 `renderTimeline` 的 `tail`。冻住那一遍仍照 `cut` 与 `frozenAt` 算。
-      const second = renderTimeline(timeline, cut, frozenAt, voiceId, liveCut, picks, archive, frozenAt, { entries, now: stamp })
+      const second = renderTimeline(timeline, cut, frozenAt, voiceId, liveCut, picks, archive, frozenAt, { entries, now: stamp }, forkPin)
       if (second.freeze !== null) {
         shown = second
         live = liveCut
@@ -9576,7 +10335,7 @@ export function createGameflow(options = {}) {
         // 第二遍要是**还是把这一件算丢了**（`freeze` 空了）：照第一遍**重画一遍**。
         // 光把 `shown` 换回去是不够的——第二遍已经把 DOM 擦掉重画过了，屏幕上摆的是它的画
         // （用户 m18204 那一张就是这个：面板冻着、没有按钮、记号却亮着）。
-        shown = renderTimeline(timeline, entries, stamp, voiceId, narration, picks, archive)
+        shown = renderTimeline(timeline, entries, stamp, voiceId, narration, picks, archive, null, null, forkPin)
         live = narration
       }
     }
@@ -9592,17 +10351,21 @@ export function createGameflow(options = {}) {
     // 就是两处自己打自己。
     valueTime.textContent = clockText(real)
     valuePlace.textContent = placeName(live.place || 'home', voiceId) || '地图外面'
-    // 屏幕上摆着几条没挑的岔口——门框上那枚记号跟着它亮（见 paintDoorBadge）。
     openRowEl = shown.openRow || null
     openForkEl = shown.openFork || null
-    paintDoorBadge(shown.pending || 0)
+    // 屏幕上摆着几条没挑的岔口——门框上那枚记号跟着它亮（见 paintDoorBadge）。
+    // 记下来的这个数就是**「按钮在不在」本身**（见 renderTimeline 返回处）：门收着的时候
+    // 那一支（refreshBadge）读的也是它，不再自己走一遍折叠梯子（用户 m04298）。
+    drawnPending = shown.pending || 0
+    paintDoorBadge(drawnPending)
     // 他此刻那句话写在见闻录最新一行的右栏里，落进去之后再让它一个字一个字浮出来。
     typeInto(shown.remark, live.line)
     // 记住「此刻」那一行的抬头，好让 tickClock 每分钟把它改成现在几点。
     // **停在那一刻的时候不记**：那一行的抬头写的就是那一刻，不该跟着钟往后走（用户 m17334）。
     nowWhen = frozenAt === null ? shown.when : null
     if (keepScroll > 0) timeline.scrollTop = keepScroll
-    colsHead.hidden = entries.length === 0
+    // 两栏的抬头只在真有行的时候摆；今天还没按过「开始冒险」（幕布）时也不摆（见 renderTimeline）。
+    colsHead.hidden = entries.length === 0 || shown.curtain === true
     syncGutter()
     scheduleMeasure()
   }
@@ -9827,8 +10590,20 @@ export function createGameflow(options = {}) {
    *
    *   · 长动画帧（Chrome 123+ 的 LoAF）：一次卡顿里**谁在跑**、跑了多久、
    *     其中多少毫秒花在**强制排版**上——`scripts[].invoker` 直接点出函数名。
+   *   · longtask：这一坨到底是不是 JS 任务（LoAF 只说「这一帧长」，longtask 说「谁欠的」）。
    *   · 滚动事件的**轨迹**（时刻 + scrollTop）：一格格跟手，还是攒到最后跳一下。
-   *   · 没有 LoAF 就退回 longtask。
+   *
+   *   2026-10-31（t28）修了三个把读数读歪的地方：
+   *   ① 从前是 `if (有 LoAF) … else if (有 longtask)`——真机 Chromium 123+ 都走第一支，
+   *      longtask 观察器**从没装上**，`tasks` 永远是空的，于是「说是 JS 的长任务」这条
+   *      线索永远拿不到。现在两个都装。
+   *   ② 从前两套时间原点混着记：`frames[].at` 是**文档原点**（performance.now()），
+   *      而 `path[].t` / `first` / `last` 是**墙钟**（Date.now()，因为 `now()` 是那个）。
+   *      t27 就是拿这两种数比大小，得出「60 帧全在滚动之后」的假结论。现在这一节里
+   *      **所有时刻都是文档原点**（`perfNow()`），墙钟只留一个 `at` 当信封；
+   *      哪些字段是什么原点，写进了交回去的 JSON（`origin` / `timeOrigin` / 字段旁的注释）。
+   *   ③ 缓冲只留最近 60 帧、丢了不知道多少——「只有 60 帧」和「只看到最近 60 帧」
+   *      在文件里长得一样。现在 `dropped` 里记累计丢掉的条数（只增不减）。
    *
    * 默认对装上插件的人完全不存在（开关是宿主主目录里的那个文件）。
    * 自检那套垫片没有 PerformanceObserver，`scrollWatch` 一直是 null，
@@ -9836,9 +10611,25 @@ export function createGameflow(options = {}) {
    * ------------------------------------------------------------------ */
   let scrollWatch = null
 
+  // 这一节里所有时刻用它：**文档原点**，与 LoAF / longtask 的 startTime 同一个钟。
+  // 没有 performance（自检垫片）就退回 now()——那时也只有它一个钟，不存在混记。
+  const perfNow = () =>
+    typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : now()
+
   function startScrollWatch() {
     if (scrollWatch) return
-    const watch = { path: [], frames: [], tasks: [], events: [], scrolls: 0, first: 0, last: 0, timer: 0 }
+    const watch = {
+      path: [],
+      frames: [],
+      tasks: [],
+      events: [],
+      scrolls: 0,
+      first: 0,
+      last: 0,
+      timer: 0,
+      // 2026-10-31（t28）：缓冲有上限（下面几处 splice），从前丢了就丢了。
+      dropped: { frames: 0, tasks: 0, path: 0, events: 0 },
+    }
     scrollWatch = watch
     try {
       if (typeof PerformanceObserver !== 'function') return
@@ -9852,27 +10643,37 @@ export function createGameflow(options = {}) {
             if (e.name !== 'wheel' && e.name !== 'pointermove' && e.name !== 'scroll') continue
             watch.events.push({
               n: e.name,
+              // 文档原点（与 frames[].at 同一个钟）
               at: Math.round(e.startTime),
               wait: Math.round((e.processingStart || e.startTime) - e.startTime),
               run: Math.round((e.processingEnd || e.processingStart || 0) - (e.processingStart || e.startTime)),
               dur: Math.round(e.duration),
             })
           }
-          if (watch.events.length > 80) watch.events.splice(0, watch.events.length - 80)
+          if (watch.events.length > 80) {
+            watch.dropped.events += watch.events.length - 80
+            watch.events.splice(0, watch.events.length - 80)
+          }
         })
         watch.event.observe({ type: 'event', buffered: true, durationThreshold: 8 })
       }
+      // 2026-10-31（t28）：两件**都装**，不再是 if/else（见上面 ①）。
       if (has('long-animation-frame')) {
         watch.loaf = new PerformanceObserver((list) => {
           for (const e of list.getEntries()) {
+            const scripts = e.scripts || []
             watch.frames.push({
+              // 文档原点（performance.now()）
               at: Math.round(e.startTime),
               dur: Math.round(e.duration),
               block: Math.round(e.blockingDuration || 0),
               render: Math.round(e.renderStart || 0),
               style: Math.round(e.styleAndLayoutStart || 0),
               ui: Math.round(e.firstUIEventTimestamp || 0),
-              scripts: (e.scripts || []).slice(0, 3).map((s) => ({
+              // 这一帧里一共跑了几个脚本（下面 scripts 只留前三个）。t27 要的就是这个数：
+              // 「只有三个」和「有三个以上」是两件事。
+              scriptsN: scripts.length,
+              scripts: scripts.slice(0, 3).map((s) => ({
                 f: s.invoker || s.name || '?',
                 src: String(s.sourceURL || '').split('/').pop(),
                 dur: Math.round(s.duration || 0),
@@ -9880,32 +10681,51 @@ export function createGameflow(options = {}) {
               })),
             })
           }
-          if (watch.frames.length > 60) watch.frames.splice(0, watch.frames.length - 60)
+          if (watch.frames.length > 60) {
+            watch.dropped.frames += watch.frames.length - 60
+            watch.frames.splice(0, watch.frames.length - 60)
+          }
         })
         watch.loaf.observe({ type: 'long-animation-frame', buffered: true })
-      } else if (has('longtask')) {
+      }
+      if (has('longtask')) {
         watch.task = new PerformanceObserver((list) => {
           for (const e of list.getEntries()) {
+            // attribution 从前只留了 name。t27 §7 要的三样（容器类型/名字/来源）是判断
+            // 「这一坨是插件自己，还是宿主那个 iframe / 滚动容器」的唯一凭据。
             const a = (e.attribution && e.attribution[0]) || null
-            watch.tasks.push({ at: Math.round(e.startTime), dur: Math.round(e.duration), n: (a && a.name) || '?' })
+            watch.tasks.push({
+              at: Math.round(e.startTime),
+              dur: Math.round(e.duration),
+              n: (a && a.name) || '?',
+              ctype: (a && a.containerType) || '',
+              cname: (a && a.containerName) || '',
+              csrc: String((a && a.containerSrc) || '').split('/').pop(),
+            })
           }
-          if (watch.tasks.length > 60) watch.tasks.splice(0, watch.tasks.length - 60)
+          if (watch.tasks.length > 60) {
+            watch.dropped.tasks += watch.tasks.length - 60
+            watch.tasks.splice(0, watch.tasks.length - 60)
+          }
         })
         watch.task.observe({ type: 'longtask', buffered: true })
       }
     } catch { /* 取证坏了不该惊动界面 */ }
   }
 
-  /** 每来一个滚动事件记一格（相对第一次的毫秒 + 位置）。攒多了丢老的——我只要看形状。 */
+  /** 每来一个滚动事件记一格（文档原点的毫秒 + 位置）。攒多了丢老的——我只要看形状。 */
   function noteScroll() {
     const watch = scrollWatch
     if (!watch) return
-    const t = now()
+    const t = perfNow()
     if (!watch.first) watch.first = t
     watch.last = t
     watch.scrolls += 1
-    watch.path.push({ t: Math.round(t - watch.first), y: Math.round(Number(timeline.scrollTop) || 0) })
-    if (watch.path.length > 200) watch.path.splice(0, watch.path.length - 200)
+    watch.path.push({ t: Math.round(t), y: Math.round(Number(timeline.scrollTop) || 0) })
+    if (watch.path.length > 200) {
+      watch.dropped.path += watch.path.length - 200
+      watch.path.splice(0, watch.path.length - 200)
+    }
     if (watch.timer) window.clearTimeout(watch.timer)
     watch.timer = window.setTimeout(flushScrollWatch, 1200)
   }
@@ -9917,10 +10737,15 @@ export function createGameflow(options = {}) {
     watch.timer = 0
     const body = {
       kind: 'scroll',
+      // 信封上的墙钟只用来对日历；**下面所有毫秒都是文档原点**。
       at: new Date(now()).toISOString(),
       theme: themeId,
       voice: voiceId,
       open: isOpen === true,
+      origin: 'document',
+      timeOrigin: typeof performance !== 'undefined' && performance.timeOrigin ? Math.round(performance.timeOrigin) : null,
+      visibilityState: typeof document !== 'undefined' && document.visibilityState ? document.visibilityState : null,
+      hasFocus: typeof document !== 'undefined' && typeof document.hasFocus === 'function' ? document.hasFocus() : null,
       dpr: typeof devicePixelRatio === 'number' ? devicePixelRatio : null,
       viewport: typeof innerWidth === 'number' ? { w: innerWidth, h: innerHeight } : null,
       rows: entries.length,
@@ -9928,14 +10753,21 @@ export function createGameflow(options = {}) {
       view: Math.round(Number(timeline.clientHeight) || 0),
       top: Math.round(Number(timeline.scrollTop) || 0),
       scrolls: watch.scrolls,
+      // `spanMs` 是**这一趟的时长**（末次减首次），不是时刻；两个端点另给 firstAt/lastAt。
+      // 从前它跟 frames[].at 混着比，才有了「60 帧全在滚动之后」那个假结论。
       spanMs: Math.round(watch.last - watch.first),
-      // 这一页跑的是不是新那一版？那三处动画改成 steps(4, end) 之后，
-      // 这里读出来就是 'steps(4, end)'。若是 'ease' 之类，说明页面还挂着旧 bundle，
-      // 后面所有数字都不必看（这一条是给「改了没生效」留的证人）。
-      steps: (() => {
+      firstAt: Math.round(watch.first),
+      lastAt: Math.round(watch.last),
+      dropped: { ...watch.dropped },
+
+      // 这一页跑的是不是**这一版**？（这是界面审计里那条「假证人」：原来这里读
+      // `.gf-lamp-flicker` 的 animation-timing-function、等它等于 'steps(4, end)'，
+      // 可那三处动画 2026-10-09 之后早改回光滑了 ⇒ 这个证人**天天报「旧 bundle」**，
+      // 每次取证都得先怀疑它一句。现在改查一个只有这一版才有的东西：地图那张 svg 上的
+      // role="application"（界面审计 U3 加的键盘落脚点），旧 bundle 里没有。）
+      bundle: (() => {
         try {
-          const lamp = room.querySelector('.gf-lamp-flicker')
-          return lamp ? String(getComputedStyle(lamp).animationTimingFunction || '') : null
+          return room.querySelector("svg[role='application']") ? 'application' : null
         } catch {
           return null
         }
@@ -9968,11 +10800,36 @@ export function createGameflow(options = {}) {
       const done = refresh()
       void room.offsetWidth // 先让浏览器认下初始态，过渡才会跑
       room.classList.add('gf-open')
+      // 2026-10-31（t28）：第一次开门才灌地图。顺序是「先让这一帧画出来（那行
+      // 「正在铺开地图…」+ 面板推开的过渡），再灌」——所以用 rAF 里再 setTimeout，
+      // 保证中间**真的有过一次绘制**，不是灌完才第一次上屏。
+      // 灌一次就够（`fillMap()` 第二次返回 false），之后再开门零成本。
+      if (stageHandle && !stageHandle.mapBuilt) {
+        stageNote.hidden = false
+        const fill = () => {
+          if (!stageHandle.fillMap()) return
+          stageNote.hidden = true
+        }
+        const painted =
+          typeof window !== 'undefined' && window && typeof window.requestAnimationFrame === 'function'
+        if (painted) window.requestAnimationFrame(() => window.setTimeout(fill, 0))
+        else fill()
+      }
       // 开始跟钟走：每分钟改抬头，跨整五分钟重新读一次记录（见 tickClock）。
       // 先记下「现在是哪一格、哪个钟点」，免得刚打开就白刷一次。
       clockSlot = Math.floor(now() / landEveryMs)
       clockHour = new Date(now()).getHours()
       scheduleClock()
+      // 2026-10-31（t29）：HTML 那一层的「一个世界单位多少像素」在开门那一帧还量不准
+      // （见闻录的滚动条要等行都排完才占位，508 里少掉的那 11px 就是这么来的）。
+      // 过渡结束之后再量一次、把记号挪准——位置探针抓到过 1.8px 的偏差。
+      window.clearTimeout(liveSettleTimer)
+      liveSettleTimer = window.setTimeout(() => {
+        if (!isOpen || !stageHandle) return
+        stageHandle.liveBox = null
+        stageHandle.liveKey = ''
+        placeLive(stageHandle)
+      }, 420)
       // 无障碍（2026-10-08 更晚 b259 数出来的四条之一）：面板是一扇对话窗，打开之后焦点该进去。
       // 有选项就落在最上面那颗选项上，没有就落在面板本身（它上面给了 tabindex="-1"）。见 focusInto。
       Promise.resolve(done).then(focusInto).catch(() => { /* 聚焦失败不该把面板弄崩 */ })
@@ -9984,6 +10841,9 @@ export function createGameflow(options = {}) {
       // 那一支只重读记录、重画记号，不碰版面（见 tickClock）。
       scheduleClock()
       room.classList.remove('gf-open')
+      // 收起面板时顺手退出细节版（界面审计 U10）：下次推开门该是一张干净的全图，
+      // 而不是「上次拖到天边」的那一扇（那颗「全图」按钮也一起收走）。
+      if (stageHandle && stageHandle.zoomOn) zoomExit(stageHandle)
       document.removeEventListener('keydown', onKeydown, true)
       document.removeEventListener('pointerdown', onPointerDown, true)
       closeTimer = window.setTimeout(() => {
@@ -9994,6 +10854,14 @@ export function createGameflow(options = {}) {
 
   function onKeydown(e) {
     if (e.key !== 'Escape') return
+    /* 界面审计 U10（与地图审计 M-1 是同一个 bug）：细节版开着的时候，Esc 的第一层意思
+       是「回全图」——从前这里不管三七二十一先 setOpen(false)，一巴掌把整块面板关掉，
+       连带着他刚拖到的位置一起没了。和上面那条清单的规矩一样：一层一层往回退。 */
+    if (stageHandle && stageHandle.zoomOn) {
+      e.stopPropagation()
+      zoomExit(stageHandle)
+      return
+    }
     // 清单开着的时候，Esc 先收清单（面板还留着）——再按一次才收面板。
     if (menuOpen) {
       e.stopPropagation()
@@ -10131,6 +10999,19 @@ export function createGameflow(options = {}) {
     // 窗口一变宽窄，滚动条的空档可能变（0 或 15px），对齐用的那个数跟着重算。
     // 用可选调用：冒烟里的 window 垫片只给了定时器，没有事件。
     window.addEventListener?.('resize', syncGutter)
+    // 界面审计 U11：深色开关也可能来自系统（见 isDark 的第 ③ 道闸），
+    // 系统那边一变，色板得跟着换一套，不能等他重开页面。
+    try {
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        const mq = window.matchMedia('(prefers-color-scheme: dark)')
+        // 老 WebView 只有 addListener
+        if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onSchemeChange)
+        else if (typeof mq.addListener === 'function') mq.addListener(onSchemeChange)
+        schemeWatch = mq
+      }
+    } catch (e) {
+      // 读不到系统偏好就算了，色板照旧
+    }
   }
 
   function destroy() {
@@ -10140,6 +11021,23 @@ export function createGameflow(options = {}) {
     nowWhen = null
     observer?.disconnect()
     observer = null
+    // 那一层的尺寸监听也要摘（见 stage.appendChild(stageHandle.live) 之后那段）
+    try {
+      stageWatch?.disconnect()
+    } catch (e) {
+      // 摘不掉也不该把面板弄崩
+    }
+    stageWatch = null
+    // 系统深色那条监听也要摘（见 mount 里的 schemeWatch）
+    try {
+      if (schemeWatch) {
+        if (typeof schemeWatch.removeEventListener === 'function') schemeWatch.removeEventListener('change', onSchemeChange)
+        else if (typeof schemeWatch.removeListener === 'function') schemeWatch.removeListener(onSchemeChange)
+      }
+    } catch (e) {
+      // 摘不掉也不该把面板弄崩
+    }
+    schemeWatch = null
     window.removeEventListener?.('resize', syncGutter)
     host.remove()
     mounted = false
@@ -10152,11 +11050,13 @@ export function createGameflow(options = {}) {
     close: () => setOpen(false),
     toggle: () => setOpen(!isOpen),
     refresh,
+    // 面板收着时走钟那一支（见 refreshBadge）：只重算门上那枚记号，不动版面。
+    // 自检要验「门收着与门开着对同一份记录得出同一个结果」，得能单独叫它一次。
+    refreshBadge,
     setTheme(id) {
       if (!THEMES[id]) return
       themeId = id
-      applyTheme()
-      refresh()
+      retheme()
     },
     // 跟窗里那两个小按钮走同一条路（`paintVoice` 会把选中的那个画出来）。
     setVoice(id) {
@@ -10193,6 +11093,8 @@ export const inject = []
 
 /** 宿主半边把记录挂在这条路由上（见 src/index.js）。 */
 const RECORDS_URL = '/dsh-gameflow/records'
+/** 8 → 9：按下「开始冒险」那条写路由（见 postStart 与 src/index.js 的 startDay）。 */
+const START_URL = '/dsh-gameflow/start'
 
 /**
  * 「量尺寸」的路由（见 `src/index.js` 里那一节）。
@@ -10258,34 +11160,69 @@ async function sendMeasure(body) {
  * @returns {Promise<Array<object>>}
  */
 export async function fetchRecords() {
-  return (await fetchStore()).records
+  // 老契约不变：只认数组，要不到就是空的（界面那条路走 `fetchStore`，见它的注释）。
+  const store = await fetchStore()
+  return store ? store.records : []
 }
 
 /**
  * 向宿主半边要**整份存档**：记录 + 那两个标量（`since` / `seam`，见 `archive` 那段注释）。
  *
  * `fetchRecords` 是它剥出记录那一半的老写法，留着给自检与 e2e 用（它们只认数组）。
- * 任何失败都退回一间空屋子——宁可显示「他还没走过多远。」，也不该在界面上弹错误、
- * 更不该自己编数据出来。
  *
- * @returns {Promise<{records: Array<object>, since: number, seam: object|null}>}
+ * **两种「没有」要分清楚**（报告 B-08）：
+ *   · 压根没有传输层（没有 `fetch`、`file://` 打开预览页）——那间屋子本来就是空的，
+ *     交回一份空存档；
+ *   · 真去要了、但要不到（非 2xx、网络断了、回的 JSON 坏了）——交回 **null**。
+ *     调用方拿到 null 就**保留上一份**：宿主抖一下不该把见闻录擦掉重画。
+ *     老写法 `fetchRecords` 两种都摊平成空数组（它的契约一直是「只认数组」）。
+ *
+ * @returns {Promise<{records: Array<object>, since: number, seam: object|null}|null>}
  */
 export async function fetchStore() {
-  const empty = { records: [], since: 0, seam: null }
+  const empty = { records: [], since: 0, seam: null, dayStart: 0 }
   if (typeof fetch !== 'function') return empty
   if (typeof location !== 'undefined' && location.protocol === 'file:') return empty
   try {
     const res = await fetch(RECORDS_URL, { headers: { accept: 'application/json' } })
-    if (!res.ok) return empty
+    if (!res.ok) return null
     return readStore(await res.json())
   } catch {
-    return empty
+    return null
+  }
+}
+
+/**
+ * 告诉宿主「他开始冒险了」：从这一刻起算这一天（8 → 9，用户 m04200，见 src/index.js 的 startDay）。
+ *
+ * 成功的判据只有一条：宿主回 2xx 且 `{ ok: true }`。没有传输层、连不上、宿主回 4xx/5xx
+ * 一律交回 false——`pressStart` 只在 true 的时候才掀幕布，所以这条必须诚实。
+ *
+ * @returns {Promise<boolean>}
+ */
+export async function postStart(at) {
+  if (typeof fetch !== 'function') return false
+  if (typeof location !== 'undefined' && location.protocol === 'file:') return false
+  const time = Number(at) || Date.now()
+  try {
+    const res = await fetch(START_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ at: time }),
+    })
+    if (!res.ok) return false
+    const data = await res.json().catch(() => null)
+    return !!(data && data.ok === true)
+  } catch {
+    return false
   }
 }
 
 export function apply(ctx) {
   const gf = createGameflow({
     loadRecords: fetchStore,
+    // 按下「开始冒险」要落到宿主的存档里（见 postStart）：只在真写成时才掀幕布。
+    startSession: postStart,
   })
 
   if (ctx && typeof ctx.effect === 'function') {

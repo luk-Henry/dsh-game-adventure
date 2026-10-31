@@ -29,6 +29,24 @@
 export const view = { x: 0, y: 0, w: 66, h: 34 }
 
 /**
+ * 地图上**四块陆地各自的底色**（2026-10-30 地图审计 M-9）。
+ *
+ * 从前四块陆地铺的是同一张草纹图案：北境的冻土、东岸的旱地、西岸的草原、
+ * 珊瑚海的岛，颜色一模一样。远看是一整块绿，读图的人分不出哪块是哪块。
+ *
+ * 底色写在这里而不是画图的 `src/map/world.js` 里：这是「这个世界长什么样」的
+ * 知识，跟 `places` 的坐标一样该跟着世界包走。`base` 是平铺图案的底色，
+ * `tint` 是那块地上深浅斑的颜色；西岸那一块保持原来的 `#B7C084`，别的一律
+ * 只挪一点，四块并排看得出差别、单独看还是同一张图。
+ */
+export const mapLands = {
+  west: { base: '#B7C084', tint: '#9FB46A' },
+  north: { base: '#AFBB9E', tint: '#97A786' },
+  east: { base: '#C7BD8D', tint: '#B1A573' },
+  isles: { base: '#ADC39A', tint: '#93AB80' },
+}
+
+/**
  * 地图上的**十三个**地点：屋里七个（城里）＋ 野地六个（见下）。
  *
  * `door` 是他站在城镇门口的位置（也是「他现在在这儿」那个记号钉下去的地方）；
@@ -48,7 +66,7 @@ export const view = { x: 0, y: 0, w: 66, h: 34 }
  *     这一版只有三个落在一级国上，撞出来的都是一条不到 0.4 单位的缝（约 2px）。
  *
  * 所以这七个点跟 `.scratch/world3.py` 的 `NATIONS` 是**一一对应**的：
- * 西边是人的地界（酒馆、公会、落脚处），东边最远那一站是半身人的集市，
+ * 西边是人的地界（酒馆、公会、落脚处），东边最远那一站是半身人的货栈，
  * 精灵的高塔存卷轴，古林深处抄咒文，矮人的炉边打法器。
  */
 export const places = {
@@ -63,11 +81,11 @@ export const places = {
    * 里走 `placeName`）。四个字是有意的：地名签的宽度按字数估（`w = name.length * fs + 1.5`），
    * 四个字跟原来「冒险者公会」差不多宽，不会比从前更容易撞上地图上那些地形名。
    *
-   * `ledger` 那一份是**停用的案牍**那一套的名字，没动（它本来就更像衙门的说法）。 */
+   * `ledger` 那一份是**停用的案牍**那一套的名字，没动（它本来就更像公署的说法）。 */
   tavern: { id: 'tavern', x: 3.6, y: 26.77, door: [3.6, 27.67], name: { ledger: '酒馆', adventure: '灰鹳旅店' } },
   guild: { id: 'guild', x: 15, y: 7.37, door: [15, 8.27], name: { ledger: '公会', adventure: '铜盾公会' } },
   home: { id: 'home', x: 10.5, y: 18.09, door: [10.5, 18.99], name: { ledger: '落脚处', adventure: '他的屋子' } },
-  market: { id: 'market', x: 57.5, y: 8.77, door: [57.5, 9.67], name: { ledger: '集市', adventure: '东岸集市' } },
+  market: { id: 'market', x: 57.5, y: 8.77, door: [57.5, 9.67], name: { ledger: '货栈', adventure: '东岸货栈' } },
   archive: { id: 'archive', x: 12.5, y: 12.39, door: [12.5, 13.29], name: { ledger: '档案塔', adventure: '银树书库' } },
   scriptorium: { id: 'scriptorium', x: 12.8, y: 27.79, door: [12.8, 28.69], name: { ledger: '抄写室', adventure: '古林书斋' } },
   workshop: { id: 'workshop', x: 19.5, y: 13.77, door: [19.5, 14.67], name: { ledger: '工坊', adventure: '炉边作坊' } },
@@ -103,8 +121,11 @@ export const places = {
    *
    * 「他出门了 / 一条记录都没有」那一支**钉在 `home`**（落脚处），不再另立一枚野地：
    * 记号的意思是「他此刻在这儿」，他的日子本来就都发生在这张图上。 */
-  ruin: { id: 'ruin', x: 14.0, y: 19.8, door: [14.0, 19.8], wild: true, name: { adventure: '乱石岗' } },
-  frost: { id: 'frost', x: 8.0, y: 7.5, door: [8.0, 7.5], wild: true, name: { adventure: '霜原' } },
+  // 2026-10-30 M-5：从 (14.0, 19.8) 往下挪半格到 (14.2, 20.4)——原来那枚记号的边正压在
+  // 奇观「符文石」上（`world.check()` 记作 1.92 × 0.34 的一处压住）。
+  ruin: { id: 'ruin', x: 14.2, y: 20.4, door: [14.2, 20.4], wild: true, name: { adventure: '乱石岗' } },
+  // 2026-10-30 M-5：从 (8.0, 7.5) 往上挪到 (8.0, 6.2)——原来那枚记号压着「石冠城」那枚城牌。
+  frost: { id: 'frost', x: 8.0, y: 6.2, door: [8.0, 6.2], wild: true, name: { adventure: '霜原' } },
   mine: { id: 'mine', x: 17.0, y: 10.2, door: [17.0, 10.2], wild: true, name: { adventure: '地下矿洞' } },
   quench: { id: 'quench', x: 11.2, y: 22.0, door: [11.2, 22.0], wild: true, name: { adventure: '河湾' } },
   tower: { id: 'tower', x: 16.5, y: 21.5, door: [16.5, 21.5], wild: true, name: { adventure: '废塔' } },

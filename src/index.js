@@ -16,7 +16,7 @@
  * 因为框架包名解析不到而在加载期就炸掉。
  */
 
-import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, rename, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import zlib from 'node:zlib'
@@ -42,6 +42,9 @@ const inject = ['webServer']
 
 /** 界面取数据的路由前缀。 */
 const ROUTE_PATH = '/dsh-gameflow'
+
+/** 本机回环地址的几种写法（IPv4、IPv6、以及 Node 在双栈上给的那种）。 */
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 
 /**
  * 记录文件的落点（相对 DSH 主目录）：`~/.dsh/gameflow/records.json`。
@@ -79,6 +82,9 @@ const MEASURE_DIR_SEGMENTS = [STORE_SEGMENTS[0], 'measure']
 /** 一次量尺寸最多收多少字节——防的是把整棵 DOM 塞回来。 */
 const MAX_MEASURE_BYTES = 2 * 1024 * 1024
 
+/** 「开始冒险」那一条只收一个时刻，给足余量即可（`{ "at": 1792845300000 }`）。 */
+const MAX_START_BYTES = 4 * 1024
+
 /** 最多保留多少条记录，防止文件无限长。 */
 const MAX_RECORDS = 5000
 
@@ -99,14 +105,18 @@ const MAX_RECORDS = 5000
  * 7 → 8 **旧日子真删**（用户 m01403 第 2 条）。记录只剩今天，另外记两个标量：
  *        `since`（这份存档的头一天，序曲认它）与 `seam`（最近被删掉的那一段的起止，
  *        今天第一行上面那句「隔了一夜」认它）。见 pruneStore。
+ * 8 → 9 **按下「开始冒险」才算开场**（用户 m04200 逐字：「不是，我刚刚点开，就已经存在
+ *        2 条冒险在里面了，这是不对的。当用户点开的时候，才会开始计算时间，并到下一个
+ *        5 分钟的时候才会落盘。」）。多记一个标量 `dayStart`：他按下那一刻的钟点。
+ *        按下之前攒的记录在这一刻被删掉（不是藏起来），见 startDay 那一段。
  * 每次加字段就 +1：装上插件的人盘上已经有一份旧格式，**版本号是让回填重跑的唯一开关**
- * ——只在文件里加字段而不升版本，旧记录永远不会补上新的那两栏。
+ * ——只在文件里加字段而不升版本，旧记录永远不会补上新的那几栏。
  *
  * 7 → 8 这一跳会让回填重跑一遍（把所有历史会话重新读成记录），紧接着被 `pruneStore`
  * 裁到只剩今天——白读一趟，换来的是那两个标量从**全部历史**里算出来，而不是从盘上
  * 还留着的那几条里算。这一步只在升级那一次发生。
  */
-const STORE_VERSION = 8
+const STORE_VERSION = 9
 
 /**
  * 隔多久把内存里的东西落一次盘。
@@ -154,13 +164,55 @@ function storeFile(home = resolveDshHome()) {
 }
 
 /**
- * 先写临时文件再改名——半截的 JSON 不会覆盖掉上一次的好数据。
+ * 先写临时文件、刷到盘上，再改名——半截的 JSON 不会覆盖掉上一次的好数据，
+ * 断电时也不会留下一份「名字对、内容空」的存档（那是 `rename` 之后才 `fsync`
+ * 的做法会有的毛病）。
  */
-async function writeJsonAtomic(file, value) {
+async function writeTextAtomic(file, text) {
   await mkdir(dirname(file), { recursive: true })
   const tmp = `${file}.${process.pid}.tmp`
-  await writeFile(tmp, JSON.stringify(value, null, 2), 'utf8')
+  let handle = null
+  try {
+    handle = await open(tmp, 'w')
+    await handle.writeFile(text, 'utf8')
+    await handle.sync()
+  } finally {
+    await handle?.close()
+  }
   await rename(tmp, file)
+}
+
+async function writeJsonAtomic(file, value) {
+  await writeTextAtomic(file, JSON.stringify(value, null, 2))
+}
+
+/** 坏存档改名留档用的后缀：`20261027-211305`。 */
+function corruptStamp(now = Date.now()) {
+  const d = new Date(now)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+    + `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+}
+
+/**
+ * 从**读不懂的原文**里尽量把 `since`/`seam` 捞回来。
+ *
+ * 整份 JSON 坏了，但这两个标量往往还完整地躺在文本里；而它们正是「序曲别再重播」
+ * 与「隔了一夜」的唯一来源。捞不到就落回默认值——不猜、不造。
+ */
+function salvageMeta(raw) {
+  const text = typeof raw === 'string' ? raw : ''
+  const since = Number((/"since"\s*:\s*(-?\d+)/.exec(text) || [])[1]) || 0
+  // 8 → 9 加的那个标量也照同样办法捞：它决定「今天从哪儿开始讲」，捞不到就退回今天零点
+  // （见 src/client.js 的 renderTimeline）——比把用户今天已经看见的几行全抹掉要稳。
+  const dayStart = Number((/"dayStart"\s*:\s*(\d+)/.exec(text) || [])[1]) || 0
+  const seamAt = /"seam"\s*:\s*\{[^}]*?"startedAt"\s*:\s*(\d+)/s.exec(text)
+  const seamEnd = /"seam"\s*:\s*\{[^}]*?"endedAt"\s*:\s*(\d+)/s.exec(text)
+  const startedAt = Number(seamAt?.[1]) || 0
+  const seam = startedAt
+    ? { startedAt, endedAt: Number(seamEnd?.[1]) || startedAt }
+    : null
+  return { since, seam, dayStart }
 }
 
 /**
@@ -168,20 +220,48 @@ async function writeJsonAtomic(file, value) {
  *
  * 写盘那条路要的是「记录 + 上次记下的 `since`/`seam`」，光拿记录会把两个标量越写越小
  * ——`since` 一旦丢了，序曲每天都会重播一遍。
+ *
+ * 三种「读不到」必须分开：
+ *   · 文件不在（ENOENT）——正常的第一次，当空存档；
+ *   · 文件读不动（权限、锁、磁盘）——`blocked`，调用方**这一轮不许写盘**；
+ *   · 文件读得动但解析不出来——坏存档，改名留成 `records.json.corrupt-<时间戳>`
+ *     再从原文里捞 `since`/`seam`。少了这一步，一次坏档会被当成「空存档」，
+ *     下一次落盘就把用户攒的记录整份覆盖掉（报告 B-02）。
  */
-async function readStore(file) {
+async function readStore(file, warn) {
+  let raw
   try {
-    const parsed = JSON.parse(await readFile(file, 'utf8'))
-    const seam = parsed?.seam && Number(parsed.seam.startedAt)
-      ? { startedAt: Number(parsed.seam.startedAt), endedAt: Number(parsed.seam.endedAt) || Number(parsed.seam.startedAt) }
-      : null
-    return {
-      records: Array.isArray(parsed?.records) ? parsed.records : [],
-      since: Number(parsed?.since) || 0,
-      seam,
+    raw = await readFile(file, 'utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { records: [], since: 0, seam: null, dayStart: 0 }
+    warn?.(`dsh-gameflow: 读不了 ${file}，这一轮不落盘：${String(error)}`)
+    return { records: [], since: 0, seam: null, dayStart: 0, blocked: true }
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch (error) {
+    const meta = salvageMeta(raw)
+    let saved = null
+    try {
+      saved = `${file}.corrupt-${corruptStamp()}`
+      await rename(file, saved)
+      warn?.(`dsh-gameflow: ${file} 读不懂（${String(error)}），已改名留档：${saved}`)
+    } catch (renameError) {
+      warn?.(`dsh-gameflow: ${file} 读不懂，改名留档也失败，这一轮不落盘：${String(renameError)}`)
     }
-  } catch {
-    return { records: [], since: 0, seam: null }
+    return { records: [], ...meta, corrupt: true, blocked: saved === null }
+  }
+  const seam = parsed?.seam && Number(parsed.seam.startedAt)
+    ? { startedAt: Number(parsed.seam.startedAt), endedAt: Number(parsed.seam.endedAt) || Number(parsed.seam.startedAt) }
+    : null
+  return {
+    records: Array.isArray(parsed?.records) ? parsed.records : [],
+    since: Number(parsed?.since) || 0,
+    seam,
+    // 按下「开始冒险」那一刻（8 → 9）。没有它（老存档、没按过）就是 0，
+    // 界面退回「今天零点」的老规矩。
+    dayStart: Number(parsed?.dayStart) || 0,
   }
 }
 
@@ -336,15 +416,28 @@ const MAX_STRETCH_MS = 2 * 60 * 60 * 1000
  *
  * 拿不到事件时刻（老数据、或者上游没给 time）时，退回首尾相减。
  */
+/**
+ * 一段「坐着的时长」最多算 8 小时。
+ *
+ * 这是**防护，不是业务规则**：正常路径根本够不着这条线——`MAX_STRETCH_MS` 让一段
+ * 最多铺两小时，`ACTIVE_GAP_MS` 又把十分钟以上的空档扣掉。它兜的是最后那条退化
+ * 路径：事件一个都没带 `time` 的时候只能拿首尾相减，而一个跨了两天的会话能算出
+ * 44 小时，写到卡片上就是一句谁也不信的话。
+ */
+const MAX_ACTIVE_MINUTES = 8 * 60
+
 function activeMinutes(times, startedAt, endedAt) {
   const marks = (Array.isArray(times) ? times : []).filter((t) => Number.isFinite(t)).sort((a, b) => a - b)
-  if (marks.length === 0) return Math.max(0, Math.round((endedAt - startedAt) / 60000))
+  if (marks.length === 0) {
+    const span = Math.max(0, Math.round((endedAt - startedAt) / 60000))
+    return Math.min(MAX_ACTIVE_MINUTES, span)
+  }
   let active = 0
   for (let i = 1; i < marks.length; i++) {
     const gap = marks[i] - marks[i - 1]
     if (gap > 0 && gap <= ACTIVE_GAP_MS) active += gap
   }
-  return Math.max(0, Math.round(active / 60000))
+  return Math.min(MAX_ACTIVE_MINUTES, Math.max(0, Math.round(active / 60000)))
 }
 
 /**
@@ -497,6 +590,9 @@ function createRecorder(options = {}) {
   /** @type {Map<string, object>} 记录 id → 已经收尾的那几段 */
   const done = new Map()
 
+  /** @type {Map<string, number>} 会话 id → 已经发出过几段（见 `startDraft`） */
+  const seqOf = new Map()
+
   /** 开一段新的。第 1 段沿用会话 id，之后的段派生 `#2`、`#3`…… */
   function startDraft(session, seq, startedAt) {
     const sessionId = String(session?.id ?? 'unknown')
@@ -536,7 +632,12 @@ function createRecorder(options = {}) {
     let draft = drafts.get(id)
     if (draft === undefined) {
       const startedAt = Number(session?.header?.createdAt) || now()
-      draft = startDraft(session, 1, startedAt)
+      // 序号只能往前走：同一个会话 id 被 `disposed` 之后再 `created` 一次（恢复旧会话、
+      // 宿主重开），从 1 重来的话新记录会顶着旧记录的 id，`mergeRecords` 里「新的赢」
+      // 就把先前那一整段吃掉（报告 B-04）。
+      const seq = (seqOf.get(id) ?? 0) + 1
+      seqOf.set(id, seq)
+      draft = startDraft(session, seq, startedAt)
       drafts.set(id, draft)
     }
     return draft
@@ -551,8 +652,11 @@ function createRecorder(options = {}) {
   function rollOver(session, draft, at) {
     const record = finalizeDraft(draft)
     if (record !== null) done.set(record.id, record)
-    const next = startDraft(session, (draft.seq ?? 1) + 1, at)
-    drafts.set(String(session?.id ?? 'unknown'), next)
+    const sessionId = String(session?.id ?? 'unknown')
+    const seq = Math.max(seqOf.get(sessionId) ?? 0, draft.seq ?? 1) + 1
+    seqOf.set(sessionId, seq)
+    const next = startDraft(session, seq, at)
+    drafts.set(sessionId, next)
     return next
   }
 
@@ -608,6 +712,17 @@ function createRecorder(options = {}) {
       // 这一格（整五分钟）里的账。事件没有时刻就算不进去——那几格本来也没法落定。
       let tick = null
       if (Number.isFinite(at)) {
+        // 这一段真正的起点是**第一件事**，不是会话的 `createdAt`。
+        //
+        // `createdAt` 只说明「这个会话开过」：昨天 09:00 开的会话，今天 10:00 才接着说
+        // 完全正常（实测里跨 52 小时的都有）。拿它当起点会造出一条「开始昨天 09:00、
+        // 结束今天 10:00、minutes 0、actions 1」的幽灵记录——横跨两天、却没有一刻在坐着。
+        // 所以第一件事一到，起点就落到它身上；切段判据 `times.length > 0` 也就有了
+        // 正确的含义：「已有一件事 ⇒ 起点已定，才谈得上停下来」。
+        if (draft.times.length === 0) {
+          draft.startedAt = at
+          draft.endedAt = at
+        }
         // 停久了、或者这一段已经够长了 → 收尾，从这一件事开始另起一段。
         const stale = draft.times.length > 0
           && (at - draft.endedAt > SPLIT_GAP_MS || at - draft.startedAt >= MAX_STRETCH_MS)
@@ -771,6 +886,9 @@ function keepToday(records, now = Date.now()) {
  * 真头一天与真上一段，而不是盘上还留着的那几条。
  *
  * 只记两个标量、不记内容——「不保存过去的事」这条底线还在。
+ *
+ * 8 → 9 又多了第三个标量 `dayStart`（按下「开始冒险」那一刻，见下面那一段）：它不是内容，
+ * 是「今天从哪一刻开始算」的一个时刻。
  */
 function pruneStore(records, meta = {}, now = Date.now()) {
   const { kept, gone } = keepToday(records, now)
@@ -780,13 +898,30 @@ function pruneStore(records, meta = {}, now = Date.now()) {
     if (at && (!since || at < since)) since = at
   }
   let seam = meta?.seam && Number(meta.seam.startedAt) ? meta.seam : null
+  // 挑「上一段」按**结束**算，不按开始：昨天 08:00–23:59 与 22:00–22:10 两段并存时，
+  // 后者开始得晚、结束得早；真正「最后坐下的那一刻」是 23:59。按 startedAt 挑会把
+  // seam 记成 22:10，今天第一行上面那句「隔了一夜」就凭空长出 1 小时 49 分（报告 B-03）。
+  const seamEnd = (one) => Number(one?.endedAt) || Number(one?.startedAt) || 0
   for (const record of gone) {
     const at = Number(record?.startedAt) || 0
-    if (at && (!seam || at > Number(seam.startedAt))) {
-      seam = { startedAt: at, endedAt: Number(record?.endedAt) || at }
+    if (!at) continue
+    const end = Number(record?.endedAt) || at
+    if (!seam || end > seamEnd(seam)) {
+      seam = { startedAt: at, endedAt: end }
     }
   }
-  return { version: STORE_VERSION, records: kept, since, seam }
+  // 按下「开始冒险」那一刻（8 → 9，用户 m04200）。它只对**当天**有意义：跨过零点，
+  // 昨天那个起点跟今天没关系了，清成 0，等他今天再按一次（界面认出 0 就摆那颗按钮）。
+  // 留着一条陈旧时刻比清掉更坏——今天的记录会被昨天的起点「放行」，
+  // 而那正是这一版要修掉的东西（打开就见几行不属于今天的冒险）。
+  const pressed = Number(meta?.dayStart) || 0
+  const dayStart = pressed && startOfDay(pressed) === startOfDay(now) ? pressed : 0
+  // 起点之前就结束的那些，一条都不留（不是藏起来）。写盘、GET、下一次落盘都走这里，
+  // 所以内存里那几段按旧起点攒出来的草稿不会在下一轮被写回盘上（用户 m04200）。
+  const fresh = dayStart
+    ? kept.filter((record) => (Number(record?.endedAt) || Number(record?.startedAt) || 0) >= dayStart)
+    : kept
+  return { version: STORE_VERSION, records: fresh, since, seam, dayStart }
 }
 
 // ---------------------------------------------------------------------------
@@ -853,9 +988,17 @@ function recordFromEvents(events) {
   return recorder.snapshot()
 }
 
-/** 把本机已经存在的会话日志整个翻一遍。单个文件出问题不影响其他文件。 */
+/**
+ * 把本机已经存在的会话日志整个翻一遍。单个文件出问题不影响其他文件。
+ *
+ * `options.mtimeFrom`：只要**改过的时间不早于**它的会话文件。升级、重装时若存档里
+ * 已经有 `since`，真头一天与上一段接缝都已经记在盘上，回填只需要把**今天**的会话补
+ * 成记录——把整棵 `sessions/` 重新解一遍（几百个 zstd 文件）纯粹是白烧启动时间。
+ * 没有 `since` 的那一次必须全量扫：序曲要的是真实最早那天（报告 B-04 那一节）。
+ */
 async function backfillSessions(home = resolveDshHome(), options = {}) {
   const maxBytes = options.maxBytes ?? 64 * 1024 * 1024
+  const mtimeFrom = Number(options.mtimeFrom) || 0
   const records = []
   if (zstd === null) return records
   const root = join(home, 'sessions')
@@ -879,6 +1022,7 @@ async function backfillSessions(home = resolveDshHome(), options = {}) {
       try {
         const info = await stat(file)
         if (!info.isFile() || info.size > maxBytes) continue
+        if (mtimeFrom > 0 && info.mtimeMs < mtimeFrom) continue
         for (const record of recordFromEvents(decodeSessionFile(await readFile(file)))) {
           records.push(record)
         }
@@ -895,6 +1039,34 @@ async function backfillSessions(home = resolveDshHome(), options = {}) {
 // ---------------------------------------------------------------------------
 
 /**
+ * 按下「开始冒险」：**这一刻**才算这一天的起点（8 → 9，用户 m04200 逐字：
+ * 「不是，我刚刚点开，就已经存在2条冒险在里面了，这是不对的。当用户点开的时候，
+ * 才会开始计算时间，并到下一个5分钟的时候才会落盘。」）。
+ *
+ * 做两件事，缺一件都不算数：
+ *   · 记下 `dayStart = at`（与 `since`/`seam` 并列的第三个标量）。GET 会把它交回去，
+ *     界面据此决定「今天铺不铺、从哪一格起铺」；
+ *   · 把**在 at 之前就结束**的记录删掉。不是藏起来——按下的那一刻之前，这一天还没开场，
+ *     那几行本来就不属于这一场（用户要的正是「刚点开却已经有 2 条冒险」不再出现）。
+ *
+ * `since`/`seam` 原样带着走：前者是序曲的，后者是「隔了一夜」的，都跟这一下无关。
+ * 内存里那几段草稿不在这里清——写盘与 GET 都会走 `pruneStore`，它按同一个 `dayStart`
+ * 把「在起点之前就结束」的记录一并滤掉（见 pruneStore），所以不会被下一次落盘复活。
+ *
+ * @returns {Promise<{dayStart: number, dropped: number}>}
+ */
+async function startDay(file, at, recorder, warn, now = Date.now()) {
+  const store = await readStore(file, warn)
+  // 读不动就别按：宁可这一下没成，也不能把读不出来的记录当成「起点之前的」删掉。
+  if (store.blocked) throw new Error(`存档读不动，这一下不记：${file}`)
+  const merged = mergeRecords(store.records, recorder.snapshot())
+  const next = pruneStore(merged, { ...store, dayStart: at }, now)
+  const dropped = merged.length - next.records.length
+  await writeJsonAtomic(file, next)
+  return { dayStart: next.dayStart, dropped }
+}
+
+/**
  * 挂上会话监听和取数据的路由。
  *
  * @param ctx - Cordis 上下文（已保证 `webServer` 可用，见 `inject`）。
@@ -902,6 +1074,8 @@ async function backfillSessions(home = resolveDshHome(), options = {}) {
 function apply(ctx) {
   const file = storeFile()
   const recorder = createRecorder()
+  /** 只在有事要说的时候出声：坏存档、读不动、写失败。 */
+  const warn = (message) => ctx.logger?.warn?.(message)
 
   /**
    * 推开门之前先把屋子布置好：把本机已有的会话日志整个翻一遍，补成卡片。
@@ -914,7 +1088,10 @@ function apply(ctx) {
    * 于是回填的底座一定先落稳，增量再往上叠。
    */
   const bootstrap = (async () => {
-    const store = await readStore(file)
+    const store = await readStore(file, warn)
+    // 存档读不动（不是坏、不是没有，就是这一下读不到）：这一轮什么都别写。
+    // 回填与裁剪都可以等下一次，用户的记录不能因为一次读失败而清零。
+    if (store.blocked) return
     let version = 0
     try {
       const parsed = JSON.parse(await readFile(file, 'utf8'))
@@ -927,7 +1104,12 @@ function apply(ctx) {
     //   · 盘上还留着昨天（或更早）⇒ 裁。**隔夜再开门时版本号没变**，
     //     但「只有今天」这条规矩得重新执行一遍，否则昨天那一整页还挂在墙上。
     const needsBackfill = version < STORE_VERSION
-    const backfilled = needsBackfill ? await backfillSessions() : []
+    // 盘上已经记着「这份存档的头一天」时，今天之前的会话早就被裁掉了，`since`/`seam`
+    // 也在存档里躺着——这一次回填只要今天的，不必把整棵 sessions/ 重新解一遍。
+    // 反过来，`since` 缺失（第一次装、存档被清过）就必须全量扫：只有全量才能算出真头一天，
+    // 少了它序曲每天都会重播一遍。
+    const mtimeFrom = store.since > 0 ? startOfDay(Date.now()) : 0
+    const backfilled = needsBackfill ? await backfillSessions(resolveDshHome(), { mtimeFrom }) : []
     const merged = mergeRecords(store.records, backfilled)
     const pruned = pruneStore(merged, store)
     if (!needsBackfill && pruned.records.length === merged.length) return
@@ -952,7 +1134,9 @@ function apply(ctx) {
     dirty = false
     writing = writing
       .then(async () => {
-        const store = await readStore(file)
+        const store = await readStore(file, warn)
+        // 读不动就别写：宁可这一轮不落盘，也不能把读不出来的记录覆盖成空的。
+        if (store.blocked) throw new Error(`存档读不动，这一轮不落盘：${file}`)
         const merged = mergeRecords(store.records, recorder.snapshot())
         await writeJsonAtomic(file, pruneStore(merged, store))
       })
@@ -1032,6 +1216,13 @@ function apply(ctx) {
 
       // --- 量尺寸（开发钩子，开关是一个文件；见 MEASURE_SEGMENTS） ---------
       if (url.pathname === `${ROUTE_PATH}/measure`) {
+        // 只认本机回环：这是一个取证通道，永远不该从外面打得进来。
+        // 不做签名、不做 token——它不是对外接口，加一套鉴权只是给自己添维护面。
+        const remote = String(req.socket?.remoteAddress ?? '')
+        if (!LOOPBACK.has(remote)) {
+          sendJson(res, 403, { ok: false, why: '量尺寸只接受本机回环来源' })
+          return
+        }
         const on = await fileExists(join(resolveDshHome(), ...MEASURE_SEGMENTS))
         if (req.method === 'GET') {
           sendJson(res, 200, { on })
@@ -1061,10 +1252,9 @@ function apply(ctx) {
           // 分开落盘，免得一次取证把上一次的版面数字覆盖掉（见 client.js 的 startScrollWatch）。
           const file = payload?.kind === 'scroll' ? 'scroll.json' : 'layout.json'
           try {
-            await mkdir(dir, { recursive: true })
-            await writeFile(join(dir, file), JSON.stringify(payload, null, 2), 'utf8')
+            await writeJsonAtomic(join(dir, file), payload)
             if (typeof payload?.map === 'string' && payload.map !== '') {
-              await writeFile(join(dir, 'map.svg'), payload.map, 'utf8')
+              await writeTextAtomic(join(dir, 'map.svg'), payload.map)
             }
           } catch (error) {
             sendJson(res, 500, { ok: false, why: String(error) })
@@ -1075,6 +1265,51 @@ function apply(ctx) {
         }
       }
 
+      // --- 按下「开始冒险」：这一天从这一刻算起（8 → 9，用户 m04200） -------------
+      if (url.pathname === `${ROUTE_PATH}/start`) {
+        // 同 measure：只认本机回环。它改的是盘上的存档，比取证通道还该拦在外面。
+        const remote = String(req.socket?.remoteAddress ?? '')
+        if (!LOOPBACK.has(remote)) {
+          sendJson(res, 403, { ok: false, why: '开始冒险只接受本机回环来源' })
+          return
+        }
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { ok: false, why: '这一条只收 POST' })
+          return
+        }
+        let raw = ''
+        try {
+          raw = await readBody(req, MAX_START_BYTES)
+        } catch {
+          sendJson(res, 413, { ok: false, why: 'body too large' })
+          return
+        }
+        let payload = null
+        try {
+          payload = JSON.parse(raw === '' ? '{}' : raw)
+        } catch {
+          sendJson(res, 400, { ok: false, why: 'body is not JSON' })
+          return
+        }
+        const at = Number(payload?.at)
+        if (!Number.isFinite(at) || at <= 0) {
+          sendJson(res, 400, { ok: false, why: 'at 得是一个时刻（毫秒）' })
+          return
+        }
+        // 排进写盘链条：这一下也在改同一份文件，不能和定时落盘、回填抢。
+        const task = writing.then(() => startDay(file, at, recorder, warn))
+        writing = task.catch((error) => {
+          warn(`dsh-gameflow: 记下开始冒险失败：${String(error)}`)
+        })
+        try {
+          const next = await task
+          sendJson(res, 200, { ok: true, ...next })
+        } catch (error) {
+          sendJson(res, 500, { ok: false, why: String(error) })
+        }
+        return
+      }
+
       if (req.method !== 'GET' || url.pathname !== `${ROUTE_PATH}/records`) {
         res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
         res.end()
@@ -1083,7 +1318,7 @@ function apply(ctx) {
       // 磁盘上的是权威；内存里的草稿只是还没落盘的部分。
       // **应答这一条也裁**（不只是写盘时裁）：这样界面立刻就不见旧日子了，
       // 不必等到下一次整五分落盘。旧日子删掉之后，盘上留着的本来也只剩今天。
-      const store = await readStore(file)
+      const store = await readStore(file, warn)
       const merged = mergeRecords(store.records, recorder.snapshot())
       const pruned = pruneStore(merged, store)
       const body = JSON.stringify({
@@ -1091,6 +1326,9 @@ function apply(ctx) {
         records: pruned.records,
         since: pruned.since,
         seam: pruned.seam,
+        // 8 → 9：他按下「开始冒险」那一刻（见 startDay）。界面据此决定今天铺不铺、
+        // 从哪一格起铺——没有它（没按过、老存档）就退回「今天零点」的老规矩。
+        dayStart: pruned.dayStart,
       })
       res.writeHead(200, {
         'content-type': 'application/json; charset=utf-8',

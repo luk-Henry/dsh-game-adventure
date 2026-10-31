@@ -266,3 +266,38 @@ export function ribbon(pts, w0, w1, seed = 0, n = 5) {
 export function lerp(a, b, t) {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
 }
+
+/** 一句话有几个字（按码位算，不是按 UTF-16 单元——中文在 emoji 边界上会差一位）。 */
+export function nlen(s) {
+  return Array.from(String(s)).length
+}
+
+/**
+ * 一块名牌的矩形：**世界图、地方图、面板那层签，三处共用这一条算式**
+ * （2026-10-30 地图审计 M-14）。从前是三套：`local.js` 的 `plate_box`、
+ * `world.js` 的 `cityPlateBox`、`client.js` 里手写的一串 `+ 1.5`，改一处另外两处
+ * 不知道。同一份输入必须得同一个矩形，断言在 `scripts/smoke.mjs` 里钉着。
+ *
+ * 参数是**牌子中心** `(x, y)` 与字号 `fs`；高度固定 `1.62fs`，上下边距按
+ * 「字心里那 0.95 / 0.67」分，跟老算式逐位对齐（老图不能因为这次合并挪一格）。
+ * `pad` 是字与底板左右各留的空；世界图与地方图用 0.5，城名小牌用 0.42。
+ *
+ * 返回 `[x0, y0, x1, y1]`，**左上右下**。
+ */
+export function plate_rect(x, y, text, fs, pad = 0.5) {
+  const w = nlen(text) * fs + pad + fs * 0.5
+  const h = fs * 1.62
+  return [x - w / 2, y - fs * 0.95, x + w / 2, y - fs * 0.95 + h]
+}
+
+/** 牌子里那行字的基线：底板上边往下 `0.95fs`，字心再落 `fs * 0.42`。 */
+export function plate_text_y(y, fs) {
+  return y + fs * 0.42
+}
+
+/** 两个盒子相交的面积；不相交返回 0。盒子都是 `[x0, y0, x1, y1]`。 */
+export function box_overlap(a, b) {
+  const ox = Math.min(a[2], b[2]) - Math.max(a[0], b[0])
+  const oy = Math.min(a[3], b[3]) - Math.max(a[1], b[1])
+  return ox > 0 && oy > 0 ? ox * oy : 0
+}

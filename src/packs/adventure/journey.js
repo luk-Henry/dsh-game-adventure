@@ -25,18 +25,46 @@
  */
 export const journey = {
   // 册子上的十一站。**顺序即路线**，第一个不带 when（兜底：他总有个起点）。
-  // `label` 是地名（跟 `src/map/world3.js` 里那二十国对得上），`seal` 是那一处封印的样子。
+  //
+  // `label` 必须是**这张地图上真有的地名**：`src/map/world3.js` 那二十国、那几条地貌名里
+  // 查得到的那一个（面板上那枚地名签、地图上那块牌子读的是同一份数据）。2026-10-31 修过一处：
+  // 第九站原来写「霜脊荒漠」——全仓只有这一处这么写，地图上并没有这个地名，真名是**龙骨荒漠**
+  // （`world3.js` 的国家名与地貌名都是「龙骨荒漠」；「霜脊」是北边那道山脉，与荒漠是两处）。
+  //
+  // `when` 判的是**这一天真到过哪儿 / 真见过哪一景**（`stationOf` 只看今天，不靠跨天记忆）。
+  // 早几站可以用镇内那几处——河间城、银树书库、铁砧山本来就在他这一带（他的屋子就在河间王国边上，
+  // 书库与作坊是他天天去的两处）；再往后才是出镇之后才走得到的地方。所以口径不是
+  // 「只认野地」，而是「**这一站该在哪一处落脚，就挂那一处**」——镇内、野地、某一景都行。
+  //
+  // 硬规矩：**两站的条件不许等价**。`stationOf` 是**从最后一站往前**找第一个条件全中的，
+  // 所以两站条件等价时，靠前那一站**永远轮不到**。2026-10-31 之前 `sunken`（灰港/沉桥）与
+  // `sea`（珊瑚海国/海底）都挂 `quench`（河湾）：去一趟河湾两站同时成立，而 `stationOf` 先问
+  // 靠后的 `sea`，于是**靠前的 `sunken`（第六站）一次都没出现过**——册子上那一站等于不存在，
+  // 人还没出海，海底先亮了。现在十一站各靠一处/一景，没有一站的落点被后面那站整个盖住
+  // （冒烟里逐站验「可达」，另有一条判「不许两站被同一组地方绑死」）。
+  //
+  // 十一站各自的落脚处（左边是册子上的地名，右边是今天真去过的那一处）：
+  //   界碑镇（兜底）· 河间城←他的屋子 · 银树书库←档案塔 · 铁砧山←地下矿洞（山底那口竖井）
+  //   北境霜堡←霜原 · 灰港←废塔（他在那座塌了半边的塔下过了一夜，往南就是海口）· 东岸商盟←东岸货栈
+  //   鸦林←古林书斋（林子里的抄写室）· 龙骨荒漠←乱石岗（骨堆就散在乱石之间）
+  //   珊瑚海国←河湾（唯一的水路）· 灰烬之地←撞墙/交出东西
+  //
+  // ★ 两件事别弄混：**站点的输入**是 `places` / `scenes`（他今天真到过哪儿），**「他此刻在哪」**
+  //   是 `src/client.js` 的 `ACTION_PLACE`（改文件→scriptorium、跑命令→workshop……）。
+  //   `workshop`（炉边作坊）自 2026-10-31 起**不再挂任何一站**——这不是漏配：铁砧山那处封印
+  //   是「井」，竖井直下矿底，挂 `mine` 才是那个地方；作坊只是他白天干活的一处屋子，
+  //   用来算「他在哪儿」，不用来推册子。七个地点不必人人都有站，站也不必都落在野地。
   stations: [
     { id: 'stone', label: '界碑镇', seal: '碑' },
     { id: 'bridge', label: '河间城', seal: '石桥', when: [{ when: 'places', has: ['home'] }] },
     { id: 'tree', label: '银树书库', seal: '树', when: [{ when: 'places', has: ['archive'] }] },
-    { id: 'well', label: '铁砧山', seal: '井', when: [{ when: 'places', has: ['workshop'] }] },
-    { id: 'coffin', label: '北境霜堡', seal: '石棺', when: [{ when: 'places', has: ['guild'] }] },
-    { id: 'sunken', label: '灰港', seal: '沉桥', when: [{ when: 'places', has: ['tavern'] }] },
+    { id: 'well', label: '铁砧山', seal: '井', when: [{ when: 'places', has: ['mine'] }] },
+    { id: 'coffin', label: '北境霜堡', seal: '石棺', when: [{ when: 'places', has: ['frost'] }] },
+    { id: 'sunken', label: '灰港', seal: '沉桥', when: [{ when: 'places', has: ['tower'] }] },
     { id: 'bell', label: '东岸商盟', seal: '旧钟', when: [{ when: 'places', has: ['market'] }] },
     { id: 'half', label: '鸦林', seal: '半句话', when: [{ when: 'places', has: ['scriptorium'] }] },
-    { id: 'bones', label: '龙骨荒漠', seal: '骨堆', when: [{ when: 'scenes', has: ['watch', 'ruin'] }] },
-    { id: 'sea', label: '珊瑚海国', seal: '海底', when: [{ when: 'scenes', has: ['quench'] }] },
+    { id: 'bones', label: '龙骨荒漠', seal: '骨堆', when: [{ when: 'scenes', has: ['ruin'] }] },
+    { id: 'sea', label: '珊瑚海国', seal: '海底', when: [{ when: 'places', has: ['quench'] }] },
     {
       id: 'ash',
       label: '灰烬之地',
@@ -66,10 +94,10 @@ export const journey = {
   plans: {
     // 那一天他手上那几件事：{n} 是件数，{place} 是册子上那一站，{seal} 是那一处封印的样子。
     plan: [
-      '他今天手上有{n}件事，头一件是往{place}去，把{seal}那一处描上。',
+      '他今天手上有{n}件事，头一件是把{place}那一处的{seal}描上。',
       '这一天他有{n}件事要办，最要紧的是{place}那一处{seal}。',
       '他把{n}件事排了排，先办{place}，{seal}上的字得重新描一遍。',
-      '他手上有{n}件事，先往{place}走一趟，把{seal}描上。',
+      '他手上有{n}件事，头一件在{place}，把{seal}描上。',
       '这一天他记着{n}件事，头一件在{place}，是{seal}那一处。',
       '他今天要办{n}件事，第一件是{place}的{seal}。',
     ],

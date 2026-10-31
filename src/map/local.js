@@ -23,7 +23,7 @@
  * 下面两行 import 必须**各占一行且全是具名导入**：`scripts/build-client.mjs` 的摊平器
  * 用 `^import\s*\{…\}\s*from\s*'./x.js'$` 逐行认，换行写法它认不出来。
  */
-import { f2, hypot } from './geo.js'
+import { f2, hypot, plate_rect, plate_text_y } from './geo.js'
 import { pd, wob, organic, meander, blob, ribbon, lerp, hit, f3, SEA, SEA_LO, COAST, INK, INK2, RIVER, RIVER_IN, DUNE, CRACK, peak, tree, dunes, cracks, marsh, rect, tower, WONDER_HALO, WONDER_COLD, wonders, _cap_at, MAP_CSS } from './world.js'
 import { Random } from './rng.js'
 import { W, H, LANDS, BIOMES, BIOME_COLOR, RIDGES, PEAKS, FORESTS, RIVERS, LAKES, LABELS, NATIONS } from './world3.js'
@@ -357,7 +357,7 @@ function stall(x, y, s, seed) {
   return o
 }
 
-/** 集市广场：一块空场 + 井 + 三四个摊 + 两堆货。 */
+/** 货栈广场：一块空场 + 井 + 三四个摊 + 两堆货。 */
 function market(cx, cy, s, seed) {
   const rnd = new Random(seed)
   const o = [`<path d="${pd(blob(cx, cy, 0.62 * s, seed, 11, 0.66))}" fill="${STREET}" stroke="${COAST}" stroke-width="${f3(INK2 * 0.6)}" stroke-linejoin="round"/>`]
@@ -1032,24 +1032,25 @@ function terrain_layer(wx, wy, holes = []) {
 // 名字挪不动、只好丢掉的那些（给 check() 用）
 export const DROPPED = []
 
-function plate_box(x, y, text, fs) {
-  const w = nlen(text) * fs + 0.5 + fs * 0.5
-  const h = fs * 1.62
-  return [x - w / 2, y - fs * 0.95, x + w / 2, y - fs * 0.95 + h]
+/**
+ * 一块名牌的矩形。**算式已经搬到 `geo.js` 的 `plate_rect`**（2026-10-30 审计 M-14：
+ * 世界图、地方图、面板三处各写一套，改一处另外两处不知道）。这里留一个薄壳，
+ * 只是因为老代码与自检都按这个名字调它。
+ */
+export function plate_box(x, y, text, fs) {
+  return plate_rect(x, y, text, fs)
 }
 
 /** 一块牌子：奶油底 + 墨字。跟世界图上国名/地貌名同一套。 */
 function plate(x, y, text, fs, fill = '#3B2E20', bg = '#EFE7D3', op = 0.84, bold = false) {
-  const tw = nlen(text) * fs + 0.5
-  const w = tw + fs * 0.5
-  const h = fs * 1.62
-  const x0 = x - w / 2
-  const y0 = y - fs * 0.95
+  const [x0, y0, x1, y1] = plate_rect(x, y, text, fs)
+  const w = x1 - x0
+  const h = y1 - y0
   const o = []
   if (bg) {
     o.push(`<rect x="${f2(x0)}" y="${f2(y0)}" width="${f2(w)}" height="${f2(h)}" rx="${f2(fs * 0.14)}" fill="${bg}" opacity="${f2(op)}"/>`)
   }
-  o.push(`<text x="${f2(x)}" y="${f2(y + fs * 0.42)}" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.05" font-size="${f2(fs)}" fill="${fill}"${bold ? ' font-weight="600"' : ''}>${text}</text>`)
+  o.push(`<text x="${f2(x)}" y="${f2(plate_text_y(y, fs))}" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.05" font-size="${f2(fs)}" fill="${fill}"${bold ? ' font-weight="600"' : ''}>${text}</text>`)
   return o
 }
 
@@ -1059,8 +1060,16 @@ function overlaps(a, b) {
 }
 
 // 名字挪位的次序：先试原位，再上下，再左右，最后斜着——都不成就丢掉这个名字。
+//
+// 第七十九版（M-2）：候选从 13 个加到 25 个（多出 ±5.2 与 ±1.3 的斜向）。原来 20 扇
+// 地方图里有 15 扇连焦点城的名字都摆不下，光"挪一步"不够——名字得先往远处挪三回。
 const SHIFTS = [[0, 0], [0, -1.3], [0, 1.3], [-2.6, 0], [2.6, 0], [0, -2.6], [0, 2.6],
-  [-3.8, -1.3], [3.8, -1.3], [-3.8, 1.3], [3.8, 1.3], [0, -4.0], [0, 4.0]]
+  [-3.8, -1.3], [3.8, -1.3], [-3.8, 1.3], [3.8, 1.3], [0, -4.0], [0, 4.0],
+  [-5.2, 0], [5.2, 0], [-5.2, -2.6], [5.2, -2.6], [-5.2, 2.6], [5.2, 2.6],
+  [0, -5.2], [0, 5.2], [-1.3, -3.8], [1.3, -3.8], [-1.3, 3.8], [1.3, 3.8]]
+
+/** 城名牌先按这个字号摆，摆不下就缩一档再摆（0.70 → 0.60 → 0.52）。 */
+const CITY_FS = [0.70, 0.60, 0.52]
 
 /** 题名框里那个名字管得着多远：离最近的城超过这么多世界单位，就算这一带没有国家管着。 */
 const REGION_REACH = 10
@@ -1137,37 +1146,68 @@ function label_layer(wx, wy, taken, title) {
   // 焦点城也要有自己那块牌子（第六十六版）。
   const skip = new Set([title])
   for (const [name, x, y, kind] of LABELS) {
-    if (!(wx - 1 < x && x < wx + WIN_W + 1 && wy - 1 < y && y < wy + WIN_H + 1)) continue
+    // 只看**真在窗里**的名字（M-7）：原来留了 ±1 的富余，窗外一点点的名字被夹到窗边上，
+    // 看着像钉在框沿上的一块多余牌子。海名例外——海比陆大，压着窗边反而对。
+    if (kind === 'sea'
+      ? !(wx - 1 < x && x < wx + WIN_W + 1 && wy - 1 < y && y < wy + WIN_H + 1)
+      : !(wx < x && x < wx + WIN_W && wy < y && y < wy + WIN_H)) continue
     if (skip.has(name)) continue
     cands.push([1, name, x, y, 0.86, kind === 'sea' ? '#8FB0BC' : '#3B2E20',
-      kind === 'sea' ? null : '#EFE7D3'])
+      kind === 'sea' ? null : '#EFE7D3', false])
   }
   for (const [, , , , , [nx, ny], cap] of NATIONS) {
     const cname = cap[0]
     const tier = cap[3]
     // 焦点城不再跳过（第六十六版）：他站的那座城也要在城旁边写出自己的名字。
-    if (!(wx - 2 < nx && nx < wx + WIN_W + 2 && wy - 2 < ny && ny < wy + WIN_H + 2)) continue
-    const [cxp, cyp] = _cap_at(cname, nx, ny, tier)
+    // 判据只看**城在哪**，不看国名锚点——锚点在窗外、城在窗里的那种（M-2 里 6 扇就是这样
+    // 被漏掉的）也该有名字。
+    const [cxp, cyp] = _cap_at(cname, nx, ny, tier, cap[1], cap[2])
     if (!(wx - 1 < cxp && cxp < wx + WIN_W + 1 && wy - 1 < cyp && cyp < wy + WIN_H + 1)) continue
-    cands.push([0, cname, cxp, cyp - (tier === 1 ? 1.62 : 0.78) - 0.34,
-      0.70, '#5A4A34', '#EFE7D3'])
+    // 城名排在最前面（权重 2）：国名与地貌名撞上它时让路，而不是反过来（M-2）。
+    cands.push([2, cname, cxp, cyp - (tier === 1 ? 1.62 : 0.78) - 0.34,
+      CITY_FS[0], '#5A4A34', '#EFE7D3', true])
   }
   cands.sort((a, b) => b[0] - a[0])
   const o = []
-  for (const [, text, x, y, fs, fill, bg] of cands) {
+  for (const [, text, x, y, fs, fill, bg, isCity] of cands) {
     let placed = false
-    for (const [dx, dy] of SHIFTS) {
-      const bx = Math.max(wx + 0.3 + fs * nlen(text) * 0.5, Math.min(wx + WIN_W - 0.3 - fs * nlen(text) * 0.5, x + dx))
-      const by = Math.max(wy + 0.9, Math.min(wy + WIN_H - 0.6, y + dy))
-      const box = plate_box(bx, by, text, fs)
-      if (!taken.some((t) => overlaps(box, t))) {
-        taken.push(box)
-        o.push(...plate(bx, by, text, fs, fill, bg))
-        placed = true
-        break
+    // 城名摆不下就缩一档再摆；地貌名也留一档缩小（M-2：20 扇里有 6 扇的"银树森林"、
+    // "霜脊山脉"这种大字被挤掉，缩一档就进去了）。
+    const sizes = isCity ? CITY_FS : [fs, fs * 0.86]
+    for (const size of sizes) {
+      for (const [dx, dy] of SHIFTS) {
+        const bx = Math.max(wx + 0.3 + size * nlen(text) * 0.5, Math.min(wx + WIN_W - 0.3 - size * nlen(text) * 0.5, x + dx))
+        const by = Math.max(wy + 0.9, Math.min(wy + WIN_H - 0.6, y + dy))
+        const box = plate_box(bx, by, text, size)
+        if (!taken.some((t) => overlaps(box, t))) {
+          taken.push(box)
+          o.push(...plate(bx, by, text, size, fill, bg))
+          placed = true
+          break
+        }
       }
+      if (placed) break
     }
-    if (!placed) DROPPED.push(text)
+    // 最后一票否决：名字比房子重要（M-2）。挪完所有候选仍撞 ⇒ 挑**压得最少**的那个落点
+    // 照画，不丢名字；`DROPPED` 因此空着，`check()` 改用「该出现的城名有没有出现」来盯。
+    if (!placed) {
+      const size = sizes[sizes.length - 1]
+      let best = null
+      for (const [dx, dy] of SHIFTS) {
+        const bx = Math.max(wx + 0.3 + size * nlen(text) * 0.5, Math.min(wx + WIN_W - 0.3 - size * nlen(text) * 0.5, x + dx))
+        const by = Math.max(wy + 0.9, Math.min(wy + WIN_H - 0.6, y + dy))
+        const box = plate_box(bx, by, text, size)
+        let area = 0
+        for (const t of taken) {
+          const w = Math.min(box[2], t[2]) - Math.max(box[0], t[0])
+          const h = Math.min(box[3], t[3]) - Math.max(box[1], t[1])
+          if (w > 0 && h > 0) area += w * h
+        }
+        if (!best || area < best[0]) best = [area, bx, by]
+      }
+      taken.push(plate_box(best[1], best[2], text, size))
+      o.push(...plate(best[1], best[2], text, size, fill, bg))
+    }
   }
   return o
 }
@@ -1261,7 +1301,7 @@ function assemble_local(wx, wy, focus) {
   for (const [, race, , , , [nx, ny], cap] of NATIONS) {
     const cname = cap[0]
     const tier = cap[3]
-    const [cxp, cyp] = _cap_at(cname, nx, ny, tier)
+    const [cxp, cyp] = _cap_at(cname, nx, ny, tier, cap[1], cap[2])
     if (!(wx - 3 < cxp && cxp < wx + WIN_W + 3 && wy - 3 < cyp && cyp < wy + WIN_H + 3)) continue
     const r = tier === 1 ? 2.55 : 1.75
     const cy = cyp - r * 0.55
@@ -1368,7 +1408,7 @@ export function check(focus) {
   const nx = nat[5][0]
   const ny = nat[5][1]
   const tier = nat[6][3]
-  const [cx, cy] = _cap_at(focus, nx, ny, tier)
+  const [cx, cy] = _cap_at(focus, nx, ny, tier, nat[6][1], nat[6][2])
   const [wx, wy] = win_around(cx, cy)
   const r = tier === 1 ? 2.55 : 1.75
   if (!on_land(cx, cy - r * 0.55)) bad.push('镇子不在陆地上')
@@ -1381,6 +1421,16 @@ export function check(focus) {
   const tail = '<rect class="mnight" x="' + f2(wx) + '" y="' + f2(wy) + '" width="' + f2(WIN_W) + '" height="' + f2(WIN_H) + '"/>'
   if (!body.endsWith(tail)) bad.push('夜罩不在最后一条')
   for (const t of DROPPED) bad.push('名字「' + t + '」没摆下')
+  // ⑤ 窗口里每一座城都得有自己的名字牌（M-2）。名字挪位时不再"丢"，所以上面那条
+  // `DROPPED` 常年是空的——这里改成数**画出来的字**：城在框里、名字却一个都没写出来，
+  // 就报出来。删掉 / 改坏一块城名牌，这一条会立刻红。
+  const said = new Set()
+  for (const m of body.matchAll(/<text\b[^>]*>([^<]*)<\/text>/g)) said.add(m[1])
+  for (const [, , , , , [nx, ny], cap] of NATIONS) {
+    const [cxp, cyp] = _cap_at(cap[0], nx, ny, cap[3], cap[1], cap[2])
+    if (!(wx - 1 < cxp && cxp < wx + WIN_W + 1 && wy - 1 < cyp && cyp < wy + WIN_H + 1)) continue
+    if (!said.has(cap[0])) bad.push('城名「' + cap[0] + '」没画出来')
+  }
   return [bad, body.length]
 }
 
@@ -1405,7 +1455,7 @@ function cities() {
   if (_CITY === null) {
     _CITY = FOCUS.map(([cn, nn]) => {
       const nat = NATIONS.filter((n) => n[0] === nn)[0]
-      const [cx, cy] = _cap_at(cn, nat[5][0], nat[5][1], nat[6][3])
+      const [cx, cy] = _cap_at(cn, nat[5][0], nat[5][1], nat[6][3], nat[6][1], nat[6][2])
       return { cn, nn, cx, cy, tier: nat[6][3] }
     })
   }

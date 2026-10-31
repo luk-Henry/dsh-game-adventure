@@ -64,9 +64,21 @@
  *      用户 m16528 第 2 条）、每种结果至少四拍、`marks` 最多两样且名字认得出、
  *      **死只能落在分支上、而且那种路最多一种结果带 `die`**、绕回主线（`back`）也只能在分支上、
  *      `tier` 只能是 2 或 3、**每条路的兜底正好一种、而且排在最后**
- *      （读法见 `src/packs/rules.js` 的 `checkForks`）
+ *      （读法见 `src/packs/rules.js` 的 `checkForks`）。
+ *      2026-10-31 又加两条（用户 m04344「一个救那箱纸、一个救人，那不是就是让人去救人吗？」）：
+ *      **按钮上不许出现自带审判的词**（别管/不管/见死不救/袖手/少管闲事/自扫门前雪/事不关己——
+ *      那种标签等于替用户把答案写好了），**每条路那两句 `look` 至少两句、且不许出现
+ *      「代价」「风险」「会失去」**（把账摊开的句子，用户 m16528 第 2 条）。
+ *      （读法见本文件的 `scanForkRoads`；`node scripts/packs.mjs --probe-forks` 可自检）
+ *   R23 红线 14 的禁词（2026-10-27 加，文案审计 copy.md 第一节）：README 红线 14 点名禁用的
+ *      那几样东西（集市、货郎、招条、挑担的、咸菜、茶棚、背包、走镖……）过去**一条都没进断言**
+ *      ——`MODERN` 只收现代技术词，于是「二十二条规矩全过」也说明不了这条红线守住了。
+ *      现在把禁词写成一张显式表，扫**整个包的每一条字符串**（含 `rules` 与 `map`：地名签就住在
+ *      `map` 里，那是每天都会看见的位置）。红线 14 同时明文允许「收旧符的挑担人」这一种说法，
+ *      所以命中之后先把它从文本里摘掉再判——不是硬禁，是「除了这一种以外都不许」。
  */
 import { readFile } from 'node:fs/promises'
+import { writeSync } from 'node:fs'
 import { PACKS, listPacks } from '../src/packs/index.js'
 import { checkChoices, checkDirections, checkFates, checkFights, checkForks, checkJourney, checkMarks, checkMoments, checkRules } from '../src/packs/rules.js'
 // 主题 id 的真名单在 client.js 里（主题是面板的材料，不是包的内容），所以拿它来对一眼：
@@ -80,6 +92,90 @@ const add = (rule, pack, path, text) => out.push({ rule, pack, path, text })
 const MODERN = ['文件', '代码', '项目', '系统', '数据', '网络', '程序', '任务', '成就', '打卡',
   '通知', '性能', '费用', 'token', '插件', '目录', '脚本', '日志', '终端', '版本', '模型',
   '编译', '部署', '服务', '接口', '配置', '进度', '统计', '用户', '功能', '渲染', '缓存']
+// 红线 14 的禁词（2026-10-27 加，R23）。原话见 README：「抄书吏的镇子、集市、茶棚、挑担的、
+// 货郎、招条、咸菜、背包都不许再出现」，最后一句又禁了「走镖」那一路。
+// 这张表**只加不删**：删一条等于把一条红线换成一句注释。
+const REDLINE14 = [
+  // 集市那一族：地名签也在这条线上（`东岸集市` 每天出现在地图与状态行里）
+  // ——改法是改地名（换成「东岸货栈」，那是世界上真有的说法），不是把词从表里划掉
+  '集市', '货场',
+  // 挑担 / 货郎 / 行囊那一族
+  '挑担', '货郎', '行囊', '背囊', '背包', '咸菜', '茶棚',
+  // 招条（红线 14 明令）：该用的是「悬赏条」
+  '招条',
+  // 走镖那一路
+  '走镖', '镖局', '镖师',
+  // 现代物与中式市井（文案审计 M7–M11）：同一包里的窗只有窗板/窗纸/布帘，
+  // 报时只有巡夜与法师塔的钟，路只有大路与岔路
+  '窗玻璃', '钟头', '限重', '官道', '打听铺', '更夫', '打更', '梆子', '更鼓',
+  // 中式铺面与人情世故（2026-10-31 加，用户 m04298 第 1 条：「我们采用的是西幻写法，
+  // 怎么会有『掌柜的』这种称呼」）。这条红线本来就是「这个镇子该长什么样」，
+  // 称呼是其中最扎眼的一层——店铺里那个人叫店主，跟手的是学徒，住的地方是旅店，
+  // 雇主是店主，钱是铜币，官府是公署，荒野里只有石屋没有庙。
+  // 与前面几族一样：**只加不删**，改法是改句子（改成世界上真有的说法），不是划词。
+  '掌柜', '伙计', '客栈', '药铺', '东家', '破庙', '衙门', '银两', '小二',
+  '财主', '员外', '郎中', '茶楼', '酒楼', '铜板',
+]
+// 红线 14 明文允许的那一种说法（「收旧符的挑担人」）。命中之前先把它摘掉，
+// 剩下的文本里再出现「挑担」就是禁词——这样做比给「挑担」开白名单更严：
+// 「挑担的货郎」里那个「挑担」照样会被抓出来。
+const REDLINE14_OK = ['收旧符的挑担人']
+const stripAllowed = (text) => REDLINE14_OK.reduce((t, ok) => t.split(ok).join(''), text)
+
+/**
+ * 红线 14 的判定本身（2026-10-31 从 R23 里抽出来）。
+ *
+ * 抽出来只有一个理由：**同一条判定要被两处用**——扫整个包的那一处，和 `--probe`
+ * 自检那一处。如果各写一遍，冒烟验的就不是规则本身，而是「我抄得对不对」。
+ *
+ * 返回 `[{ path, text, word }]`，空数组就是干净。
+ */
+const scanRedline14 = (value, packId) => {
+  const hits = []
+  eachString(value, packId, (path, text) => {
+    const rest = stripAllowed(text)
+    for (const w of REDLINE14) if (rest.includes(w)) hits.push({ path, text, word: w })
+  })
+  return hits
+}
+/**
+ * 命运那两件事的判定（2026-10-31 加，R22 的另外两条，用户 m04344 那句
+ * 「一个救那箱纸、一个救人，那不是就是让人去救人吗？也就是选择没有意义，因为根本不会两难」）。
+ *
+ * 只判两样，都在按钮与那两句 `look` 上：
+ *
+ *   1. **按钮的词不许自带审判**。「别管」「见死不救」这种词，等于替用户把答案写好了——
+ *      按钮只说去哪儿、做什么（「横到路当中」「先看清来路」）。
+ *   2. **每条路的那两句 `look` 都得给这条路一个成立的理由，而且一个字都不许把账摊开**。
+ *      用户 m16528 第 2 条：代价不可知，选都还没选就别把结果说出来。`checkForks`
+ *      （`src/packs/rules.js`）已经卡了「`look` 最多两句」；这里卡的是「最少两句」与措辞。
+ *
+ * 返回 `[{ path, why }]`，空数组就是干净。
+ */
+const ROAD_JUDGE_WORDS = ['别管', '不管', '见死不救', '袖手', '少管闲事', '自扫门前雪', '事不关己']
+const ROAD_LEDGER_WORDS = ['代价', '风险', '会失去']
+const scanForkRoads = (forks, where = 'forks') => {
+  const bad = []
+  if (!Array.isArray(forks)) return bad
+  for (const [i, fork] of forks.entries()) {
+    for (const [j, road] of ((fork && fork.roads) || []).entries()) {
+      const at = `${where}[${i}].roads[${j}]`
+      const label = String((road && road.label) || '')
+      for (const word of ROAD_JUDGE_WORDS) {
+        if (label.includes(word)) bad.push({ path: `${at}.label`, why: `「${label}」把答案写好了（命中「${word}」）——按钮只说去哪儿、做什么，不说该不该` })
+      }
+      const look = Array.isArray(road && road.look) ? road.look : []
+      if (look.length < 2) bad.push({ path: `${at}.look`, why: `得有两句（这一条路凭什么成立、另一条路凭什么不该走），现在只有 ${look.length} 句` })
+      for (const text of look) {
+        const line = String(text)
+        for (const word of ROAD_LEDGER_WORDS) {
+          if (line.includes(word)) bad.push({ path: `${at}.look`, why: `「${line}」把账摊开了（命中「${word}」）——代价不可知（用户 m16528 第 2 条）` })
+        }
+      }
+    }
+  }
+  return bad
+}
 const LIFE_WORDS = ['吃', '睡', '枕', '被褥', '哈欠', '打盹', '起床', '面包', '汤', '靴', '晾', '灶', '宵夜']
 const WORK_WORDS = ['卷宗', '符纸', '契书', '誊', '咒', '法器', '机关', '图纸', '卷轴', '路碑',
   '矿', '火漆', '销子', '齿轮', '抄', '描', '翻', '查', '跑', '改']
@@ -124,6 +220,49 @@ const eachString = (value, path, fn) => {
   if (typeof value === 'string') return fn(path, value)
   if (Array.isArray(value)) value.forEach((v, i) => eachString(v, `${path}[${i}]`, fn))
   else if (value && typeof value === 'object') for (const [k, v] of Object.entries(value)) eachString(v, `${path}.${k}`, fn)
+}
+
+// 自检模式（2026-10-31 加，给冒烟用）：`node scripts/packs.mjs --probe "一段文本"`。
+// 只跑红线 14 那一条判定，把命中逐条打印出来，然后立刻收工——不扫包、不判别的规矩。
+// 冒烟拿它证明「这张禁词表真有牙」：塞一句带禁词的进去必须报命中（并且退出码非零），
+// 塞一句干净的必须报 0。没有这个入口，冒烟就只能验「表非空」，那什么都证明不了。
+const PROBE_AT = process.argv.indexOf('--probe')
+if (PROBE_AT >= 0) {
+  const text = process.argv[PROBE_AT + 1] || ''
+  const hits = scanRedline14(text, 'probe')
+  const lines = hits.map((hit) => `R23 自检：${hit.word} ← ${hit.text}`)
+  lines.push(`R23 自检：${hits.length} 处`)
+  // 写 fd 1 是同步的：接着就退出，管道里的字不会丢。
+  writeSync(1, `${lines.join('\n')}\n`)
+  process.exit(hits.length ? 1 : 0)
+}
+
+// 同一个道理，命运那两条也要能自检（2026-10-31 加）：冒烟拿两件**故意写的**fork 喂它，
+// 一件坏（按钮写「别管」、`look` 只有一句、句子里把代价说了）一件干净，两边的数都得对上。
+// 不这么验，冒烟只能证明「表里有这几个词」，证明不了「写回坏东西会当场红」。
+const PROBE_FORKS_AT = process.argv.indexOf('--probe-forks')
+if (PROBE_FORKS_AT >= 0) {
+  const rigged = [{
+    id: 'rigged',
+    roads: [
+      { id: 'a', label: '别管', look: ['他往路边让了半步。'] },
+      { id: 'b', label: '先看清来路', look: ['他站在檐下看。', '代价是那箱纸烧个干净。'] },
+    ],
+  }]
+  const clean = [{
+    id: 'clean',
+    roads: [
+      { id: 'a', label: '横到路当中', look: ['被按住那人脸贴着土。', '那几个人是按着令状拿人的。'] },
+      { id: 'b', label: '先看清来路', look: ['那人手边落着一把刚用过的刀。', '那人往他这边看，嘴在动。'] },
+    ],
+  }]
+  const bad = scanForkRoads(rigged, 'rigged')
+  const ok = scanForkRoads(clean, 'clean')
+  const lines = bad.map((hit) => `R22 自检：${hit.path} ← ${hit.why}`)
+  lines.push(`R22 自检：坏样本 ${bad.length} 处 / 干净样本 ${ok.length} 处`)
+  writeSync(1, `${lines.join('\n')}\n`)
+  // 坏样本一条都抓不到、或者干净样本被误伤，都算这张网不灵。
+  process.exit(bad.length >= 3 && ok.length === 0 ? 0 : 1)
 }
 
 for (const pack of Object.values(PACKS)) {
@@ -198,6 +337,11 @@ for (const pack of Object.values(PACKS)) {
       }
     }
   }
+
+  // R23：红线 14 的禁词（2026-10-27 加，2026-10-31 抽成 scanRedline14）。**整包扫**，
+  // 一个字段都不放过——这次是被「规矩全过、红线却是空的」教出来的：禁词住在 `props`、
+  // `words`、`places` 的名字、地图的地名签、乃至 `fights` 的动作句里，只审「句子池」审不到。
+  for (const hit of scanRedline14(pack, pack.id)) add('R23 红线14禁词', pack.id, hit.path, `${hit.text}（${hit.word}）`)
 
   // R9：结构
   const acts = Object.keys(pack.actionLines || {})
@@ -314,6 +458,8 @@ for (const pack of Object.values(PACKS)) {
   // 跟 R12 / R20 / R21 同一个道理：写错一个字母不会报错，只会静默地「这件命运永远不出现」。
   if (pack.forks) {
     for (const bad of checkForks(pack.forks, pack.id)) add('R22 命运', pack.id, 'forks', bad)
+    // 两难那两条（2026-10-31 加，用户 m04344）：按钮不许自带审判、每条路的 `look` 两句且不摊账。
+    for (const bad of scanForkRoads(pack.forks, pack.id)) add('R22 命运', pack.id, bad.path, bad.why)
     if (Array.isArray(pack.forks)) {
       for (const [i, fork] of pack.forks.entries()) {
         for (const [j, term] of (fork?.when || []).entries()) {
@@ -640,7 +786,7 @@ for (const [rule, list] of [...byRule].sort()) {
   if (SHOW) for (const v of list.slice(0, 12)) console.log(`    ${v.path}  ${v.text}`)
   if (SHOW && list.length > 12) console.log(`    …… 还有 ${list.length - 12} 处`)
 }
-if (!out.length) console.log('二十二条规矩全过 ✓')
+if (!out.length) console.log('二十三条规矩全过 ✓')
 
 // R3/R4 这两条与「句子有没有收尾」有关，单独把规模印出来便于对照
 const count = (value) => { let n = 0; eachString(value, '', () => { n++ }); return n }

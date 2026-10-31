@@ -207,6 +207,12 @@ export function applyPack(target = {}, worldId = DEFAULT_WORLD, voiceId = DEFAUL
   const words = (key) => copy(narrator[key] === undefined || narrator[key] === null ? world[key] : narrator[key])
   target.WORLD_LINES = words('worldLines')
   target.WORLD_QUIET = words('worldQuiet')
+  // 兜底桶得是 `WORLD_LINES` 里真有的一个桶：`worldLine` 挑不到具体桶时落到 `quiet`，
+  // 自检（`scripts/verify-rules.mjs`）也按「桶名 → WORLD_LINES[桶名]」查。句子只有一份，
+  // 就是上面那批 `worldQuiet`——这里把同一个数组接成 `quiet` 桶，不在包里抄第二遍文本。
+  if (target.WORLD_LINES && target.WORLD_QUIET && !target.WORLD_LINES.quiet) {
+    target.WORLD_LINES.quiet = target.WORLD_QUIET
+  }
   target.SHARED_LINES = words('sharedLines')
   target.HOME_LINES = words('homeLines')
   target.CAST = words('cast')

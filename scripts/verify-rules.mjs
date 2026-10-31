@@ -579,7 +579,11 @@ const journeyExpect = (facts) => {
 }
 let journeyCases = 0
 const stationPicked = new Set()
-for (const place of ['', 'home', 'archive', 'workshop', 'guild', 'tavern', 'market', 'scriptorium']) {
+for (const place of ['', 'home', 'archive', 'workshop', 'guild', 'tavern', 'market', 'scriptorium',
+  // 站点条件只看**出镇之后**的几处野地（世界包 `wild: true` 那六个）：2026-10 那轮文案修过
+  // 一次（`src/packs/adventure/journey.js` 的 `coffin`/`sunken`/`bell`/`half` 原来挂在镇内
+  // 铺子上，等于把铺子当成了大陆站点），判据里的枚举也得跟着走，否则那四站永远到不了。
+  'ruin', 'frost', 'mine', 'quench', 'tower', 'watch']) {
   for (const scene of ['', 'watch', 'ruin', 'quench']) {
     for (const fails of [0, 3, 6]) {
       for (const dels of [0, 1]) {

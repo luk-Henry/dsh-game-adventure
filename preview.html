@@ -277,10 +277,20 @@ const demo = [
 // 所以这里连说法这个参数都不传，直接用模块自己那套默认。
 const startTheme = params.get('theme') === 'classics' ? 'classics' : 'plain'
 
+// 预览页是一张「已经开场」的样张：2026-10-24 起（用户 m19006 / m19218），今天还没按过
+// 「开始冒险」的时候，面板只摆那一颗、一格都不铺——样张要看的是铺开之后的样子，
+// 所以给它一份假存储，只回答「今天已经按过」这一个键，别的一个都不写。
+const previewStore = {
+  getItem: (k) => (k === 'dsh.gameflow.started' ? String(new Date(CLOCK).setHours(0, 0, 0, 0)) : null),
+  setItem: () => {},
+  removeItem: () => {},
+}
+
 const gf = createGameflow({
   theme: startTheme,
   loadRecords: () => demo,
   now: () => CLOCK,
+  storage: previewStore,
 })
 gf.mount()
 if (!params.has('closed')) gf.open()

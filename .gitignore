@@ -14,3 +14,7 @@ dsh-agent-preset
 dsh-hmr
 plugin
 plugin-manager
+
+# AgentTeams 的运行时状态（任务、信箱、attempt 凭据）。它由 harness 自己维护，
+# 不是作品的源码，也不该进版本库。
+.agent-teams/

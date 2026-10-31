@@ -14,13 +14,23 @@
  *   · 字符串一个字不改，包括分隔符、空格、属性顺序
  * 不要「改进」画面——这是一次翻译，不是重画。
  *
+ * 调色板也是**固定**的（界面审计 I2）：这张图里的颜色全是写死的，不吃主题、不吃
+ * `prefers-color-scheme`。天色只有一处变量——外面那层 `.mnight`（见 src/client.js 的
+ * `--gf-dusk` 与 `dimForDusk`）。所以这里那些 `--gf-*` 名字（如果看到）是留给地方图
+ * 与主题对齐用的「死 token」，**不必**为它们补主题值，补了也不会被读到。
+ *
  * 底层图元（`pd` / `wob` / `organic` / `meander` / `blob` / `ribbon` / `lerp` / `hit`）
  * 来自 `geo.js`（对应 terrain.py 第 25~145 行，已验证逐位相同），这里原样再导出，
  * 让地方图只认这一个门面。
  */
-import { f2, hypot, pd as _pd, wob as _wob, organic as _organic, meander as _meander, blob as _blob, ribbon as _ribbon, lerp as _lerp, hit as _hit } from './geo.js'
+import { f2, hypot, nlen, plate_rect, plate_text_y, box_overlap, pd as _pd, wob as _wob, organic as _organic, meander as _meander, blob as _blob, ribbon as _ribbon, lerp as _lerp, hit as _hit } from './geo.js'
 import { Random } from './rng.js'
 import { W, H, LANDS, BIOMES, BIOME_COLOR, RIDGES, PEAKS, FORESTS, RIVERS, LAKES, LABELS, NATIONS, WONDERS } from './world3.js'
+// 世界包里的**地理数据**：野地的六个点、四块陆地的取色。2026-10-30 地图审计
+// M-5 / M-9 要求「野地符号落在包里的坐标上」「四块陆地的取色写在世界包里，不是
+// 写死在渲染器里」——渲染器自己不认识哪块地叫什么，只能问包。这里 import 的是
+// 数据模块（不含任何 import），不会跟 `packs/adventure/index.js` 绕成环。
+import { places as WORLD_PLACES, mapLands } from '../packs/adventure/world.js'
 
 /* ── 底层图元：显式包装再导出 ─────────────────────────────────────────
  *
@@ -99,8 +109,8 @@ export function f3(x) {
 /** Python `'{:.1f}'.format(x)`——只有自查报告在用。 */
 function f1(x) { return dec(x, 1) }
 
-/** Python 的 `len(str)`：按**码点**数，不是 UTF-16 码元。 */
-function nlen(s) { return Array.from(s).length }
+/** `nlen`（Python 的 `len(str)`，按码点数）与 `plate_rect` / `plate_text_y`
+ *  都在 `geo.js`：世界图、地方图、面板三处共用同一条算式（审计 M-14）。 */
 
 /** Python 的元组比较：逐项比，不是减法。`sort` 两边都是稳定排序。 */
 function cmpTuple(a, b) {
@@ -553,27 +563,39 @@ export function crest(x, y, s, race, field) {
  */
 export function nations(mode = 'tier1') {
   const o = []
+  // 都城：**画在 world3 给的坐标上**（2026-10-30 地图审计 M-15）。从前是「国名落点
+  // 往下挪 2.59 / 1.57」，那是照着老图手抄的偏移：深渊港数据写 (44.6,33.4)、画在
+  // (26.9,32)，差 17.76 格，还正好贴在珊瑚宫旁边。现在数据说话，牌子去躲城，不是
+  // 城去躲牌子。
   for (const row of NATIONS) {
-    const [name, race, land, color, seeds, [nx, ny], [cname, , , tier]] = row
-    const [cx, cy] = _cap_at(cname, nx, ny, tier)
+    const [name, race, land, color, seeds, [nx, ny], [cname, c0x, c0y, tier]] = row
+    const [cx, cy] = _cap_at(cname, nx, ny, tier, c0x, c0y)
     o.push(...capital(cx, cy, tier))
-    if (tier !== 1 && mode !== 'all') {
+  }
+  for (const [name, race, color, tier, cx, cy] of nationPlates()) {
+    if (tier !== 1 && mode === 'none') {
       continue
     }
-    const fs = tier === 1 ? 1.15 : 0.88
-    const cs = tier === 1 ? 1.30 : 1.00
-    const tw = nlen(name) * fs + 0.8
+    // 二级国名也写（2026-10-27 地图审计 M-3）：二十座都城都画出来了，可其中九座
+    // （二级国的）连国名都没有——图上那九座城像是凭空多的。小一号写就是了。
+    const fs = NATION_FS[tier]
+    const cs = NATION_CS[tier]
+    const [r0, r1, r2, r3] = plate_rect(cx, cy, name, fs)
     // **徽记摆在底板里面**，不是浮在底板外面。原来浮在外面，靠左的国
     // （西岸自由城邦、巨人之脊）那面盾有一半被画框切掉；放进底板之后，
     // 夹取一次就够了，而且「盾 + 名字」读成一块牌子，不是两个东西。
-    const w = tw + cs * 0.94
-    const px = Math.max(w / 2 + 0.5, Math.min(W - w / 2 - 0.5, nx))
-    const py = Math.max(1.9, Math.min(H - 1.2, ny))
-    const x0 = px - w / 2
+    const x0 = r0 - cs * 0.94
+    const w = (r2 - r0) + cs * 0.94
     const op = tier === 1 ? '0.84' : '0.72'
-    o.push(`<rect x="${f2(x0)}" y="${f2(py - fs * 0.95)}" width="${f2(w)}" height="${f2(fs * 1.62)}" rx="0.16" fill="#EFE7D3" opacity="${op}"/>`)
-    o.push(...crest(x0 + cs * 0.60, py, cs, race, color))
-    o.push(`<text x="${f2(x0 + cs * 0.94 + tw / 2)}" y="${f2(py + fs * 0.38)}" font-size="${f2(fs)}" fill="${tier === 1 ? '#3B2E20' : '#5A4A34'}" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06">${name}</text>`)
+    o.push(`<rect x="${f2(x0)}" y="${f2(r1)}" width="${f2(w)}" height="${f2(r3 - r1)}" rx="0.16" fill="#EFE7D3" opacity="${op}"/>`)
+    o.push(...crest(x0 + cs * 0.60, cy, cs, race, color))
+    o.push(`<text x="${f2(cx)}" y="${f2(plate_text_y(cy, fs))}" font-size="${f2(fs)}" fill="${tier === 1 ? '#3B2E20' : '#5A4A34'}" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06">${name}</text>`)
+  }
+  // 城名比国名小一号压在都城记号下面；落点由 `cityPlates()` 统一算（跟 `_boxes()` 同一份）。
+  for (const [cname, px, py, cfs] of cityPlates()) {
+    const [r0, r1, r2, r3] = plate_rect(px, py, cname, cfs, 0.42)
+    o.push(`<rect x="${f2(r0)}" y="${f2(r1)}" width="${f2(r2 - r0)}" height="${f2(r3 - r1)}" rx="0.14" fill="#EFE7D3" opacity="0.85"/>`)
+    o.push(`<text x="${f2(px)}" y="${f2(plate_text_y(py, cfs))}" font-size="${f2(cfs)}" fill="#2A2318" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.04">${cname}</text>`)
   }
   return o
 }
@@ -589,25 +611,100 @@ export function nations(mode = 'tier1') {
 export function labels() {
   const o = []
   const fs = 1.15
-  const taken = new Set(NATIONS.map((n) => n[0]))
-  for (const [name, x, y, kind] of LABELS) {
-    if (taken.has(name)) {
-      continue
-    }
-    const w = nlen(name) * fs + 0.8
-    const px = Math.max(w / 2 + 0.4, Math.min(W - w / 2 - 0.4, x))
-    const py = Math.max(fs * 1.05, Math.min(H - fs * 0.5, y))
+  for (const [name, kind, rect] of labelPlates()) {
+    if (!rect) continue
+    const [r0, r1, r2, r3] = rect
+    const px = (r0 + r2) / 2
+    const ty = r1 + fs * 1.37
     if (kind === 'sea') {
-      o.push(`<text x="${f2(px)}" y="${f2(py + fs * 0.36)}" font-size="${f2(fs)}" fill="#8FB0BC" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06" opacity="0.92">${name}</text>`)
+      o.push(`<text x="${f2(px)}" y="${f2(ty)}" font-size="${f2(fs)}" fill="#8FB0BC" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06" opacity="0.92">${name}</text>`)
     } else {
-      o.push(`<rect x="${f2(px - w / 2)}" y="${f2(py - fs * 0.95)}" width="${f2(w)}" height="${f2(fs * 1.62)}" rx="0.16" fill="#EFE7D3" opacity="0.72"/>`)
-      o.push(`<text x="${f2(px)}" y="${f2(py + fs * 0.38)}" font-size="${f2(fs)}" fill="#3B2E20" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06">${name}</text>`)
+      o.push(`<rect x="${f2(r0)}" y="${f2(r1)}" width="${f2(r2 - r0)}" height="${f2(r3 - r1)}" rx="0.16" fill="#EFE7D3" opacity="0.72"/>`)
+      o.push(`<text x="${f2(px)}" y="${f2(ty)}" font-size="${f2(fs)}" fill="#3B2E20" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" letter-spacing="0.06">${name}</text>`)
     }
   }
   return o
 }
 
 // ---------------------------------------------------------------- 出图
+
+const clampNum = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v)
+
+/* 国名与地貌名。一级国名 1.15 → 1.22（2026-10-30 地图审计 M-13）：地图本体宽 508px
+ * 里每单位 508 / 66 = 7.7px，1.15 只有 8.9px，比城名（0.95）显不出层级；1.22 约 9.4px，
+ * 仍然压得住图。二级国名 0.88 → 0.92，跟城名拉开一档。
+ *
+ * 二级国名再抬到 1.11（2026-10-31 t24 抬到 1.06，t30 按真实宽度校正）：
+ * **换算是拿地图本体宽算的，不是面板宽**——面板 560，左右各 22px padding，地图本体实测
+ * 508（look 四尺寸量出来的 `.gf-stage svg` 宽）。0.92 落在 508 上只有 7.08px；1.06 也只有
+ * **1.06 × 508 / 66 = 8.16px**，还没到 8.5 那条线（t24 的 8.99px 是拿 560 算的，分母错了）。
+ * 现在是 **1.11 × 508 / 66 = 8.545px ≥ 8.5px**。
+ * 字号一大，牌子就更难躲；所以同一轮把候选落点从手写的 25 个换成按距离排序的密格
+ * （`nationShifts()`），并给二级国名加了一条「挤不下就不画」的规矩（见 `nationPlates()`）
+ * ——国名是给「他在哪一片」用的，宁可少一个，也不许两块牌子叠在一起。 */
+const NATION_FS = { 1: 1.22, 2: 1.11 }
+const NATION_CS = { 1: 1.30, 2: 1.00 }
+
+/** 地貌名牌子：夹进图里之后的那块矩形（`labels()`、`_baseBoxes()`、面板避让共用）。 */
+export function labelRect(name, x, y, fs = 1.15) {
+  const [r0, , r2] = plate_rect(0, 0, name, fs)
+  const w = r2 - r0
+  const px = clampNum(x, w / 2 + 0.4, W - w / 2 - 0.4)
+  const py = clampNum(y, fs * 1.05, H - fs * 0.5)
+  return plate_rect(px, py, name, fs)
+}
+
+/** 都城记号的包围盒（`capital()` 画的那面三角旗 + 底座）。 */
+export function capital_box(cx, cy, tier) {
+  const top = tier === 1 ? 1.62 : 0.78
+  return [cx - 1.28, cy - top, cx + 1.28, cy]
+}
+
+/* 地貌名的落点（M-4/M-13）。地貌名也挪：它从前钉死在 `world3` 给的那个点上，
+ * 于是「铁砧山脉」正好压在野地记号「地下矿洞」上、「符文石」压着「乱石岗」。
+ * 挪法是小事上下左右试一圈，谁压得少用谁；挪完的框才是城名与国名要躲的东西。 */
+const LABEL_FS = 1.15
+const LABEL_SHIFTS = [[0, 0], [0, -1.2], [0, 1.2], [-2.0, 0], [2.0, 0], [-2.0, -1.2], [2.0, -1.2],
+  [-2.0, 1.2], [2.0, 1.2], [0, -2.4], [0, 2.4], [-4.0, 0], [4.0, 0], [-4.0, -1.2], [4.0, -1.2],
+  [0, -3.6], [0, 3.6], [-6.0, 0], [6.0, 0]]
+let _LABEL_PLATES = null
+
+/** 地貌名的落点（算一次）：`[名字, 类别, 框或 null]`，跟国名重名的那十个是 null。 */
+export function labelPlates() {
+  if (_LABEL_PLATES) return _LABEL_PLATES
+  const taken = []
+  for (const row of NATIONS) {
+    const [cname, c0x, c0y, tier] = row[6]
+    const [kx, ky] = _cap_at(cname, row[5][0], row[5][1], tier, c0x, c0y)
+    taken.push(capital_box(kx, ky, tier))
+  }
+  for (const [kind, x, y, s] of WONDERS) {
+    const [hw, hh] = WONDER_BOX[kind]
+    taken.push([x - hw * s, y - hh * s, x + hw * s, y + hh * s])
+  }
+  for (const [, , , box] of wildBoxes()) taken.push(box)
+  const named = new Set(NATIONS.map((n) => n[0]))
+  const out = []
+  for (const [name, x, y, kind] of LABELS) {
+    if (named.has(name)) {
+      out.push([name, kind, null])
+      continue
+    }
+    let best = null
+    for (const [dx, dy] of LABEL_SHIFTS) {
+      const rect = labelRect(name, x + dx, y + dy, LABEL_FS)
+      let area = 0
+      for (const t of taken) area += box_overlap(rect, t)
+      const score = area + (Math.abs(dx) + Math.abs(dy)) * 0.01
+      if (!best || score < best[0]) best = [score, rect]
+      if (area === 0) break
+    }
+    taken.push(best[1])
+    out.push([name, kind, best[1]])
+  }
+  _LABEL_PLATES = out
+  return out
+}
 
 // 都城记号默认落在**名字正下方**：牌子底边和旗尖之间留 0.2 单位。
 // 不这么干的话，手写的都城坐标总有一半躲在自家牌子后面（自查报了 11 处
@@ -617,52 +714,315 @@ export const CAP_OFF = { 1: 2.59, 2: 1.57 }
 // 例外：珊瑚海国的名字浮在海上（岛太小，牌子放不下），都城得留在岛上。
 export const CAP_AT = { '珊瑚宫': [29.9, 31.0] }
 
-export function _cap_at(cname, nx, ny, tier) {
+/**
+ * 都城画在哪：**数据里的城址优先**（2026-10-30 地图审计 M-15）。
+ *
+ * 从前是「国名落点往下挪 `CAP_OFF`」——那是照着老图手抄的偏移。后来 `world3.py`
+ * 重新排过地形，二十座城的坐标变了，这里却还在按老偏移画：深渊港数据写
+ * (44.6, 33.4)、画在 (26.9, 32)，差 17.76 格，还正好贴上珊瑚宫。牌子与城名
+ * 又都是照着这个错位的结果手抄的，于是「城镇记号跟城堡中心精确重合」也成了巧合。
+ *
+ * 现在拿着 `NATIONS` 第七项里那对坐标画，牌子去躲城；只有浮岛上的珊瑚宫仍走
+ * `CAP_AT`（岛太小，城得留在岛上）。
+ */
+export function _cap_at(cname, nx, ny, tier, cx = null, cy = null) {
   if (Object.prototype.hasOwnProperty.call(CAP_AT, cname)) {
     return CAP_AT[cname]
+  }
+  // 给了数据坐标就照数据画（M-15）；`null` 与 `undefined` 都算「没给」——
+  // `Number(null)` 是 0，会让每座都城都被夹到左上角去。
+  const given = cx !== null && cx !== undefined && cy !== null && cy !== undefined
+  const x = given ? Number(cx) : NaN
+  const y = given ? Number(cy) : NaN
+  if (Number.isFinite(x) && Number.isFinite(y)) {
+    return [clampNum(x, 1.6, W - 1.6), clampNum(y, 2.4, H - 0.6)]
   }
   return [nx, ny + CAP_OFF[tier]]
 }
 
+/* 国名牌也会挪（M-13）：西半部挤着十个国名，压着地貌名与奇观。
+ * 挪法是「原位 → 上下 → 左右 → 远处」一路试，挑重叠面积最小的落点；
+ * `_boxes()` 与 `check()` 读的是同一份结果，所以自查看得见挪的效果。
+ *
+ * 2026-10-31（t24）：手写的 25 个候选不够用了。二级国名抬到 1.06 之后，
+ * 河间王国那块牌子在这 25 个里找不到落脚处，被挤到 +4.6 格上，压住「符文石」
+ * 与「乱石岗」两处。改成 `shiftRing(0.5, 7)`：0.5 格一档、曼哈顿距离 ≤ 7 的
+ * 整片菱形（约 380 个点，近的在前），二十块牌子都能零重叠落下去。 */
+const NATION_GAP = 0.55
+
+/** 以原落点为中心的一圈候选点：`step` 一档，曼哈顿距离 ≤ `radius`，近的在前。 */
+function shiftRing(step, radius) {
+  const n = Math.round(radius / step)
+  const out = []
+  for (let iy = -n; iy <= n; iy += 1) {
+    for (let ix = -n; ix <= n; ix += 1) {
+      if (Math.abs(ix) + Math.abs(iy) > n) continue
+      out.push([ix * step, iy * step])
+    }
+  }
+  out.sort((a, b) => (Math.abs(a[0]) + Math.abs(a[1])) - (Math.abs(b[0]) + Math.abs(b[1])))
+  return out
+}
+
+let _NATION_SHIFTS = null
+function nationShifts() {
+  if (!_NATION_SHIFTS) _NATION_SHIFTS = shiftRing(0.5, 7)
+  return _NATION_SHIFTS
+}
+
+// 还找不到就再往外一圈（只在二级国名要放弃之前用一次，见 `nationPlates()`）。
+// 步长跟近圈一样细（0.5）：粗了会「差 0.06 格也找不到」，南境金丘就差这么一点。
+let _NATION_FAR = null
+function nationFarShifts() {
+  if (!_NATION_FAR) _NATION_FAR = shiftRing(0.5, 16)
+  return _NATION_FAR
+}
+
+let _CITY_SHIFTS = null
+/** 城名的候选点：比国名那圈更细（0.35 一格）、半径 9 格——城名贴着城，但挤的时候也要有路可退。 */
+function cityShifts() {
+  if (!_CITY_SHIFTS) _CITY_SHIFTS = shiftRing(0.35, 9)
+  return _CITY_SHIFTS
+}
+
+let _NATION_PLATES = null
+let _NATION_SKIPS = null
+
+function nationBox(cx, cy, name, tier) {
+  const [r0, r1, r2, r3] = plate_rect(cx, cy, name, NATION_FS[tier])
+  return [r0 - NATION_CS[tier] * 0.94, r1, r2, r3]
+}
+
+/** 二十块国名牌的落点（算一次；`nations()`、`_baseBoxes()`、面板避让共用）。
+ *
+ * 抽稀规矩（2026-10-31 t24，`_NATION_SKIPS`）：一级国名十一块**一定画**（它们是这张
+ * 图的骨架）；二级国名九块按「离国名落点最近、且跟任何已有的字/记号零重叠」挑，
+ * 挑不到就**不画**——国名是给「他在哪一片」用的，两块牌子叠在一起比缺一个名字更糟。
+ * 挑掉的那几块记在 `nationSkips()` 里，冒烟数得出来。 */
+export function nationPlates() {
+  if (_NATION_PLATES) return _NATION_PLATES
+  const taken = []
+  for (const b of _fixedBoxes()) taken.push([b[2], b[3], b[4], b[5]])
+  const slots = new Array(NATIONS.length)
+  const skips = []
+  // 一级国先挑（它们是这张图的骨架），二级国补空。
+  const order = NATIONS.map((row, i) => i).sort((a, b) => (NATIONS[a][6][3] - NATIONS[b][6][3]) || (a - b))
+  for (const i of order) {
+    const row = NATIONS[i]
+    const [name, race, land, color, seeds, [nx, ny], [cname, , , tier]] = row
+    const [q0, , q2] = plate_rect(0, 0, name, NATION_FS[tier])
+    const half = (q2 - q0) / 2 + NATION_CS[tier] * 0.47
+    const look = (shifts) => {
+      let found = null
+      for (const [dx, dy] of shifts) {
+        const cx = clampNum(nx + dx, half + 0.4, W - half - 0.4)
+        const cy = clampNum(ny + dy, 1.9, H - 1.2)
+        const box = nationBox(cx, cy, name, tier)
+        const grown = [box[0] - NATION_GAP, box[1] - NATION_GAP, box[2] + NATION_GAP, box[3] + NATION_GAP]
+        let area = 0
+        for (const t of taken) area += box_overlap(grown, t)
+        // 面积一样时，近的赢
+        const score = area + (Math.abs(dx) + Math.abs(dy)) * 0.004
+        if (!found || score < found[0]) found = [score, cx, cy, box, area]
+        if (area === 0) break
+      }
+      return found
+    }
+    let best = look(nationShifts())
+    // 近的那圈找不到零重叠，就先往外再找一圈（二级国名才有这一步；一级国名不许跑远）。
+    if (tier !== 1 && best[4] > 0) {
+      const far = look(nationFarShifts())
+      if (far[4] < best[4]) best = far
+    }
+    if (tier !== 1 && best[4] > 0) {
+      // 二级国名：找一个零重叠的落点找不到 ⇒ 这一块不画（见上面的抽稀规矩）。
+      skips.push([name, `零重叠落点找不到（最近的也压 ${Number(f2(best[4]))} 格²）`])
+      slots[i] = null
+      continue
+    }
+    taken.push(best[3])
+    slots[i] = [name, race, color, tier, best[1], best[2]]
+  }
+  _NATION_PLATES = slots.filter(Boolean)
+  _NATION_SKIPS = skips
+  return _NATION_PLATES
+}
+
+/** 被抽稀掉的那几块国名牌（`[名字, 为什么]`）。正常情况下是空的。 */
+export function nationSkips() {
+  nationPlates()
+  return _NATION_SKIPS || []
+}
+
 /**
- * 所有牌子和首都记号的包围盒，用来查「谁压在谁身上」。
+ * 不动的那些记号：地貌名、都城、奇观、野地。城名与国名都绕着它们落。
  *
  * 眼睛查这个不可靠：一张 508px 的图上十几块牌子和二十个记号，
  * 漏掉一处叠在一起，读图的人第一眼就看见。所以让机器报。
  */
-export function _boxes() {
+function _fixedBoxes() {
   const out = []
-  const taken = new Set(NATIONS.map((n) => n[0]))
-  for (const [name, x, y, kind] of LABELS) {
-    if (taken.has(name)) {
-      continue
-    }
-    const fs = 1.15
-    const w = nlen(name) * fs + 0.8
-    const px = Math.max(w / 2 + 0.4, Math.min(W - w / 2 - 0.4, x))
-    const py = Math.max(fs * 1.05, Math.min(H - fs * 0.5, y))
-    out.push([name, 'label', px - w / 2, py - fs * 0.95, px + w / 2, py + fs * 0.67])
+  for (const [name, kind, rect] of labelPlates()) {
+    if (!rect) continue
+    out.push([name, 'label', rect[0], rect[1], rect[2], rect[3]])
   }
   for (const row of NATIONS) {
-    const [name, race, land, color, seeds, [nx, ny], [cname, , , tier]] = row
-    const [cx, cy] = _cap_at(cname, nx, ny, tier)
-    if (tier === 1) {
-      const fs = 1.15
-      const cs = 1.30
-      const w = nlen(name) * fs + 0.8 + cs * 0.94
-      const px = Math.max(w / 2 + 0.5, Math.min(W - w / 2 - 0.5, nx))
-      const py = Math.max(1.9, Math.min(H - 1.2, ny))
-      out.push([name, 'nation', px - w / 2, py - fs * 0.95, px + w / 2, py + fs * 0.67])
-    }
-    const top = tier === 1 ? 1.62 : 0.78
-    out.push([cname, 'capital', cx - 1.28, cy - top, cx + 1.28, cy])
+    const [cname, c0x, c0y, tier] = row[6]
+    const [kx, ky] = _cap_at(cname, row[5][0], row[5][1], tier, c0x, c0y)
+    const [q0, q1, q2, q3] = capital_box(kx, ky, tier)
+    out.push([cname, 'capital', q0, q1, q2, q3])
   }
   for (const [kind, x, y, s] of WONDERS) {
     const [hw, hh] = WONDER_BOX[kind]
     out.push(['奇观·' + WONDER_CN[kind], 'wonder',
       x - hw * s, y - hh * s, x + hw * s, y + hh * s])
   }
+  for (const [name, x, y, box] of wildBoxes()) {
+    out.push([name, 'wild', box[0], box[1], box[2], box[3]])
+  }
   return out
+}
+
+/** 图上所有牌子和记号（不动的那些 + 国名 + 城名），用来查「谁压在谁身上」。 */
+function _baseBoxes() {
+  const out = _fixedBoxes()
+  for (const [name, race, color, tier, cx, cy] of nationPlates()) {
+    const [b0, b1, b2, b3] = nationBox(cx, cy, name, tier)
+    out.push([name, 'nation', b0, b1, b2, b3])
+  }
+  for (const [name, px, py, fs] of cityPlates()) {
+    const [r0, r1, r2, r3] = plate_rect(px, py, name, fs, 0.42)
+    out.push([name, 'city', r0, r1, r2, r3])
+  }
+  return out
+}
+
+// 城名牌（2026-10-27 地图审计 M-3）。二十座都城一直画着，可图上没有一个城名——
+// 他自己站在「银树城」，那三个字在整张图上找不到。城名比国名小一号，压在都城记号
+// **下面**（记号占 cy-top..cy）；挤不开就按 `cityShifts()` 就近挪，挪完还挤就挑
+// 压得最少的落点照画（名字比留白重要）。
+//
+// 2026-10-31（t24）：候选从手写的 59 个换成 `shiftRing(0.35, 4.2)`——国名抬到 1.06
+// 之后西半部更挤，手写候选里挑不出零重叠的落点（自查剩「龙骨城 × 奇观·龙骸」一处）。
+const CITY_FS = 0.95
+const CITY_FS_LO = 0.82
+let _CITY_PLATES = null
+
+function cityPlateBox(px, py, name) {
+  const [r0, r1, r2, r3] = plate_rect(px, py, name, CITY_FS, 0.42)
+  return [name, 'city', r0, r1, r2, r3]
+}
+
+/** 二十块城名牌的落点（算一次，`nations()` 与 `_boxes()` 共用同一份）。 */
+export function cityPlates() {
+  if (_CITY_PLATES) return _CITY_PLATES
+  const taken = _fixedBoxes().map((b) => [b[2], b[3], b[4], b[5]])
+  // 国名先定（它们大、候选多），城名躲着它们。
+  for (const [name, race, color, tier, cx, cy] of nationPlates()) taken.push(nationBox(cx, cy, name, tier))
+  const out = []
+  for (const row of NATIONS) {
+    const [, , , , , [nx, ny], [cname, c0x, c0y, tier]] = row
+    const [cx, cy] = _cap_at(cname, nx, ny, tier, c0x, c0y)
+    let best = null
+    // 先按 0.95 试；还挤就缩到 0.82 再试一遍（M-6/M-13：城名压不住地名就小一号）。
+    for (const [rank, fs] of [[0, CITY_FS], [1, CITY_FS_LO], [2, 0.72], [3, 0.66]]) {
+      // 城名压在都城记号**下面**：牌子顶边在记号底边之下留 0.35
+      const baseY = cy + 0.35 + fs * 0.95
+      const [q0, , q2] = plate_rect(0, 0, cname, fs, 0.42)
+      const half = (q2 - q0) / 2
+      for (const [dx, dy] of cityShifts()) {
+        const px = clampNum(cx + dx, half + 0.3, W - half - 0.3)
+        const py = clampNum(baseY + dy, fs * 0.95 + 0.2, H - fs * 0.8)
+        const box = plate_rect(px, py, cname, fs, 0.42)
+        let area = 0
+        for (const t of taken) area += box_overlap(box, t)
+        const score = area + rank * 0.35
+        if (!best || score < best[0]) best = [score, px, py, fs]
+        if (area === 0) break
+      }
+      if (best && best[0] < 0.35) break
+    }
+    taken.push(plate_rect(best[1], best[2], cname, best[3], 0.42))
+    out.push([cname, best[1], best[2], best[3]])
+  }
+  _CITY_PLATES = out
+  return out
+}
+
+export function _boxes() {
+  return _baseBoxes()
+}
+
+/**
+ * 图上所有**写着字或画着记号**的地方，展开成扁平的矩形表——
+ * `[说法, 种类, x0, y0, x1, y1]`（2026-10-30 M-4 用）。
+ *
+ * 面板上那枚地名签得躲开这张图上已有的字与记号，不然「银树城」三个字会压在
+ * 「银树森林」上。世界图与面板是两套坐标系：世界图这张表按 `VIEW` 平移即可。
+ */
+export function textBoxes() {
+  const out = _boxes()
+  return out.map((b) => [b[0], b[1], b[2], b[3], b[4], b[5]])
+}
+
+/**
+ * 面板上那枚地名签的落点（M-4）。返回 `plate_rect` 那块矩形。
+ *
+ * 四个方向都试：右、左、上、下。右/左按**签子的边**留 `gapX`（不是按中心），
+ * 上/下按签子的底边/顶边留 `gapUp`/`gapDown`——原来的算式就是「右移 3.0」
+ * 「上移 4.2」「贴顶时下移 0.9」，这里只是再多算三条备选，谁压得少用谁。
+ *
+ * 压的分两档：压图上已有的字与记号算真的；压自己那枚针（半径 `pinR` 的一小块）
+ * 乘以 3——签压针，读起来像针掉进了牌子。出框的一律不用（除非四个方向全出框）。
+ */
+/** 面板地名签的正文字号（M-4：1.75 时十三枚里有十枚压在图上别的字上，1.6 时剩两枚）。 */
+export const PLACE_FS = 1.6
+
+export function placeLabel(px, py, text, fs, view, opts = {}) {
+  const gapX = opts.gapX === undefined ? 3.0 : opts.gapX
+  const gapUp = opts.gapUp === undefined ? 4.2 : opts.gapUp
+  const gapDown = opts.gapDown === undefined ? 0.9 : opts.gapDown
+  const pinR = opts.pinR === undefined ? 1.05 : opts.pinR
+  const sizes = opts.sizes || [fs, fs * 0.88, fs * 0.78]
+  const boxes = textBoxes()
+  const pin = [px - pinR, py - pinR, px + pinR, py + pinR]
+  // 候选点：十六个方向 × 五档远近。近的先试，同分时近的赢。
+  const dirs = [[1, 0], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 1], [-1, -1], [-1, 1],
+    [1, -0.45], [1, 0.45], [-1, -0.45], [-1, 0.45], [0.45, -1], [-0.45, -1], [0.45, 1], [-0.45, 1]]
+  const rungs = [1, 1.5, 2.1, 2.9, 4.0]
+  let best = null
+  for (let rank = 0; rank < sizes.length; rank++) {
+    const size = sizes[rank]
+    const [q0, , q2] = plate_rect(0, 0, text, size)
+    const w = q2 - q0
+    let clean = false
+    for (const rung of rungs) {
+      for (const [sx, sy] of dirs) {
+        const cx = sx === 0 ? px : px + Math.sign(sx) * (Math.abs(sx) * gapX * rung + w / 2)
+        const cy = sy === 0 ? py : py + Math.sign(sy) * (Math.abs(sy) * (sy > 0 ? gapDown : gapUp) * rung
+          + (sy > 0 ? size * 0.95 : size * 0.67))
+        const rect = plate_rect(cx, cy, text, size)
+        const inside = rect[0] >= view.x + 0.4 && rect[2] <= view.x + view.w - 0.4
+          && rect[1] >= view.y + 0.4 && rect[3] <= view.y + view.h - 0.4
+        let area = 0
+        for (const b of boxes) area += box_overlap(rect, [b[2], b[3], b[4], b[5]])
+        const onPin = box_overlap(rect, pin)
+        // 压住的分按面积算；可**挪太远**同样难受——签离针十几格，读的人得来回找。
+        // 所以面积乘 2.2、每远一档再加 0.5：宁可偏一点压着边，也不要跑到图那头去。
+        const score = area * 2.2 + onPin * 4 + (inside ? 0 : 1e6) + (rung - 1) * 0.5 + rank * 0.5
+        if (!best || score < best[0]) best = [score, rect, size]
+        if (area === 0 && onPin === 0 && inside) {
+          clean = true
+          break
+        }
+      }
+      if (clean) break
+    }
+    if (clean) break
+  }
+  const [, rect, size] = best
+  // 前四项是牌子那块矩形，第五项是实际用上的字号（挤的时候会小一号）。
+  return [rect[0], rect[1], rect[2], rect[3], size]
 }
 
 /** 报出所有互相压住的牌子/记号。空着才是好的。 */
@@ -690,8 +1050,8 @@ export function check() {
   const rings = []
   for (const rs of Object.values(LANDS)) for (const r of rs) rings.push(r)
   for (const row of NATIONS) {
-    const [name, race, land, color, seeds, [nx, ny], [cname, , , tier]] = row
-    const [cx, cy] = _cap_at(cname, nx, ny, tier)
+    const [name, race, land, color, seeds, [nx, ny], [cname, c0x, c0y, tier]] = row
+    const [cx, cy] = _cap_at(cname, nx, ny, tier, c0x, c0y)
     if (!rings.some((r) => hit(r, cx, cy))) {
       console.log(`！都城落在海里：${cname}（${name}）@ ${f1(cx)},${f1(cy)}`)
     }
@@ -705,6 +1065,12 @@ export function check() {
     }
     if (!WONDER_SEA.has(kind) && !on) {
       console.log(`！奇观落在海里：${cn}（${kind}）@ ${f1(x)},${f1(y)}`)
+    }
+  }
+  // 野地：六个地方都得踩在陆地上（M-5 加了记号，记号不能站进海里）。
+  for (const [name, x, y] of wildBoxes()) {
+    if (!rings.some((r) => hit(r, x, y))) {
+      console.log(`！野地落在海里：${name} @ ${f1(x)},${f1(y)}`)
     }
   }
   return bad
@@ -1041,14 +1407,114 @@ export const WONDER_FN = { tree: worldtree, isle: floatisle, tower: archtower,
   bones: dragonbones, crystal: crystalvein,
   rune: runestones, blight: blightland }
 
-// 自查用：每个奇观相对锚点的半宽/半高（单位＝s 的倍数）＋中文名 ＋该在陆地还是海上
+// 自查用：每个奇观相对锚点的半宽/半高（单位＝s 的倍数）＋中文名 ＋该在陆地还是海上。
+//
+// 这张表量的是**画上去的东西**（骨架、塔身、树冠），不含那圈淡光晕：光晕是 44% 的
+// 径向渐变，压在别人底下也不碍读字，可它的外接矩形比实物大一圈。2026-10-31（t24）
+// 把龙骸这一项从 [2.42, 1.56] 收到 [2.05, 1.10]：旧值量的是光晕（半径 2.35s 那个圆），
+// 于是矩形右下角把龙骨城的都城旗圈了进去，自查报「龙骨城 × 奇观·龙骸」一处——
+// 其实旗子站在光晕外头的沙地上，两者没碰着。骨架本身没变。
 export const WONDER_BOX = { tree: [1.62, 2.32], isle: [1.28, 2.34], tower: [0.78, 2.10],
-  bones: [2.42, 1.56], crystal: [1.28, 1.06], rune: [1.28, 1.36],
+  bones: [2.05, 1.10], crystal: [1.28, 1.06], rune: [1.28, 1.36],
   blight: [1.32, 1.08] }
 export const WONDER_CN = { tree: '世界之树', isle: '浮岛', tower: '大法师塔',
   bones: '龙骸', crystal: '水晶脉', rune: '符文石',
   blight: '污染之地' }
 export const WONDER_SEA = new Set(['isle'])
+
+export const WILD_CN = { ruin: '乱石岗', frost: '霜原', mine: '地下矿洞',
+  quench: '河湾', tower: '废塔', watch: '夜哨' }
+
+// 自查用：每个野地记号相对锚点的半宽/半高（世界单位，s = 1）
+export const WILD_BOX = { ruin: [1.02, 0.62], frost: [0.96, 0.54], mine: [0.86, 0.70],
+  quench: [1.08, 0.58], tower: [0.66, 0.96], watch: [0.60, 0.92] }
+
+/**
+ * 六个野地的记号（2026-10-30 地图审计 M-5）。
+ *
+ * 从前这六个地方只在**面板**上有一枚钉子，世界图上什么都没有：乱石岗、霜原、
+ * 地下矿洞、河湾、废塔、夜哨——名字在句子里天天出现，图上找不到在哪儿。
+ * 六枚记号各画各的，不是同一个点换个颜色：
+ *
+ *   ruin   三块歪着的碎石          frost  三道冻裂 + 一点冰凌
+ *   mine   拱形洞口（里面是黑的）  quench 一弯水 + 两丛芦苇
+ *   tower  断成半截的塔身          watch  一根旗杆 + 一盏灯
+ *
+ * 全都用图上的墨色与石色，尺寸压在 1 单位上下——它们是地标，不是奇观。
+ */
+export function wildMark(kind, cx, cy, s = 1.0) {
+  const o = []
+  if (kind === 'ruin') {
+    const stones = [[-0.52, 0.10, 0.46, 0.34, -0.14], [0.10, 0.06, 0.40, 0.52, 0.09],
+      [0.62, 0.14, 0.30, 0.28, 0.18]]
+    for (const [bx, by, w, h, tilt] of stones) {
+      const px = cx + bx * s
+      const py = cy + by * s
+      const tx = px + Math.sin(tilt) * h * s
+      const ty = py - Math.cos(tilt) * h * s
+      o.push(`<path d="${pd([[px - w / 2 * s, py], [px + w / 2 * s, py], [tx + w * 0.34 * s, ty], [tx - w * 0.30 * s, ty]])}" fill="${STONE_LO}" stroke="${COAST}" stroke-width="${f3(INK2 * 0.95)}" stroke-linejoin="round"/>`)
+    }
+    return o
+  }
+  if (kind === 'frost') {
+    for (let k = 0; k < 3; k++) {
+      const px = cx + (k - 1) * 0.44 * s
+      const py = cy + (k === 1 ? -0.10 : 0.06) * s
+      o.push(`<path d="${pd([[px - 0.26 * s, py], [px, py - 0.26 * s], [px + 0.26 * s, py], [px, py + 0.24 * s], [px - 0.26 * s, py]])}" fill="none" stroke="#8FA9B4" stroke-width="${f3(INK2 * 0.9)}" stroke-linejoin="round" opacity="0.85"/>`)
+    }
+    o.push(`<circle cx="${f2(cx + 0.10 * s)}" cy="${f2(cy - 0.34 * s)}" r="${f3(0.07 * s)}" fill="#E3EAEB" opacity="0.9"/>`)
+    return o
+  }
+  if (kind === 'mine') {
+    o.push(`<path d="${pd([[cx - 0.78 * s, cy + 0.54 * s], [cx - 0.78 * s, cy - 0.10 * s], [cx - 0.30 * s, cy - 0.54 * s], [cx + 0.30 * s, cy - 0.54 * s], [cx + 0.78 * s, cy - 0.10 * s], [cx + 0.78 * s, cy + 0.54 * s]])}" fill="#6E6557" stroke="${COAST}" stroke-width="${f3(INK2)}" stroke-linejoin="round"/>`)
+    o.push(`<path d="${pd([[cx - 0.42 * s, cy + 0.52 * s], [cx - 0.42 * s, cy - 0.04 * s], [cx, cy - 0.34 * s], [cx + 0.42 * s, cy - 0.04 * s], [cx + 0.42 * s, cy + 0.52 * s]])}" fill="#221B14"/>`)
+    return o
+  }
+  if (kind === 'quench') {
+    o.push(`<path d="${pd([[cx - 0.96 * s, cy + 0.16 * s], [cx - 0.30 * s, cy + 0.44 * s], [cx + 0.50 * s, cy + 0.40 * s], [cx + 0.98 * s, cy + 0.10 * s]], false)}" fill="none" stroke="${SEA_LO}" stroke-width="${f3(0.30 * s)}" stroke-linecap="round" opacity="0.9"/>`)
+    for (const [bx, hgt] of [[-0.30, 0.42], [0.26, 0.34]]) {
+      const px = cx + bx * s
+      const py = cy + 0.30 * s
+      o.push(`<line x1="${f2(px)}" y1="${f2(py)}" x2="${f2(px + 0.04 * s)}" y2="${f2(py - hgt * s)}" stroke="${COAST}" stroke-width="${f3(INK2 * 0.8)}" stroke-linecap="round"/>`)
+      o.push(`<line x1="${f2(px + 0.04 * s)}" y1="${f2(py - hgt * s * 0.7)}" x2="${f2(px + 0.20 * s)}" y2="${f2(py - hgt * s * 0.95)}" stroke="${COAST}" stroke-width="${f3(INK2 * 0.7)}" stroke-linecap="round"/>`)
+    }
+    return o
+  }
+  if (kind === 'tower') {
+    o.push(`<path d="${pd([[cx - 0.50 * s, cy + 0.80 * s], [cx - 0.40 * s, cy - 0.30 * s], [cx - 0.12 * s, cy - 0.88 * s], [cx + 0.22 * s, cy - 0.52 * s], [cx + 0.40 * s, cy + 0.80 * s]])}" fill="${STONE}" stroke="${COAST}" stroke-width="${f3(INK2 * 1.05)}" stroke-linejoin="round"/>`)
+    o.push(`<line x1="${f2(cx - 0.30 * s)}" y1="${f2(cy + 0.20 * s)}" x2="${f2(cx + 0.30 * s)}" y2="${f2(cy + 0.14 * s)}" stroke="${COAST}" stroke-width="${f3(INK2 * 0.7)}" opacity="0.6"/>`)
+    return o
+  }
+  // watch：旗杆 + 灯
+  o.push(`<line x1="${f2(cx - 0.10 * s)}" y1="${f2(cy + 0.80 * s)}" x2="${f2(cx - 0.10 * s)}" y2="${f2(cy - 0.72 * s)}" stroke="${COAST}" stroke-width="${f3(INK2 * 1.1)}" stroke-linecap="round"/>`)
+  o.push(`<path d="${pd([[cx - 0.10 * s, cy - 0.72 * s], [cx + 0.46 * s, cy - 0.44 * s], [cx - 0.10 * s, cy - 0.16 * s]])}" fill="${RIVER_IN}" stroke="${COAST}" stroke-width="${f3(INK2 * 0.85)}" stroke-linejoin="round"/>`)
+  o.push(`<circle cx="${f2(cx - 0.10 * s)}" cy="${f2(cy + 0.62 * s)}" r="${f3(0.14 * s)}" fill="#E0B26A" opacity="0.92"/>`)
+  return o
+}
+
+/** 六个野地的记号与它们的包围盒（世界包说「哪儿有野地」，记号由这张图画）。 */
+export function wildBoxes() {
+  const out = []
+  for (const key of Object.keys(WORLD_PLACES)) {
+    const place = WORLD_PLACES[key]
+    if (!place || !place.wild) continue
+    const [hw, hh] = WILD_BOX[place.id] || [0.9, 0.7]
+    const name = (place.name && (place.name.adventure || Object.values(place.name)[0])) || WILD_CN[place.id] || key
+    out.push([name, place.x, place.y, [place.x - hw, place.y - hh, place.x + hw, place.y + hh]])
+  }
+  return out
+}
+
+export function wilds() {
+  const o = []
+  for (const key of Object.keys(WORLD_PLACES)) {
+    const place = WORLD_PLACES[key]
+    if (!place || !place.wild) continue
+    // 一处一个 `<g>`，类名带着两件事：这是野地记号、它是哪一处（自检与冒烟按这个认）。
+    o.push(`<g class="gf-wild gf-wild-${place.id}">${wildMark(place.id, place.x, place.y, 1.0).join('')}</g>`)
+  }
+  return o
+}
 
 export function wonders() {
   const o = []
@@ -1066,9 +1532,15 @@ export function wonders() {
  *  底那一块必须自己带上：pattern 没有背景色，只画草的话陆地就是透明的，底下那层
  *  海会透上来（「草地颜色和海一样」就是这么来的）。
  */
-export function grassPattern(size = 6.0, n = 36, seed = 31337) {
+/** 一块陆地铺的底色：世界包说了算（M-9），没说就用草地色。 */
+export function landTone(key) {
+  const song = mapLands && mapLands[key]
+  return (song && song.base) || BIOME_COLOR['grass']
+}
+
+export function grassPattern(size = 6.0, n = 36, seed = 31337, base = null, id = 'grasstex') {
   const rnd = new Random(seed)
-  const o = [`<rect width="${f2(size)}" height="${f2(size)}" fill="${BIOME_COLOR['grass']}"/>`]
+  const o = [`<rect width="${f2(size)}" height="${f2(size)}" fill="${base || BIOME_COLOR['grass']}"/>`]
   for (let k = 0; k < n; k++) {
     const x = rnd.uniform(0.25, size - 0.25)
     // 纵向留够：一根草最高 0.30，落在 0.35 以下就会被图案的边切掉，平铺起来是一道缝
@@ -1078,7 +1550,7 @@ export function grassPattern(size = 6.0, n = 36, seed = 31337) {
       o.push(`<line x1="${f3(bx)}" y1="${f3(y)}" x2="${f3(bx + rnd.uniform(-0.08, 0.08))}" y2="${f3(y - rnd.uniform(0.16, 0.30))}" stroke="${COAST}" stroke-width="${f3(INK2 * 0.8)}" stroke-linecap="round" opacity="0.32"/>`)
     }
   }
-  return `<pattern id="grasstex" width="${f2(size)}" height="${f2(size)}" patternUnits="userSpaceOnUse">${o.join('')}</pattern>`
+  return `<pattern id="${id}" width="${f2(size)}" height="${f2(size)}" patternUnits="userSpaceOnUse">${o.join('')}</pattern>`
 }
 
 /** 草地上的深浅斑：几块很淡的色块，让大片绿地不是一块平色。
@@ -1110,8 +1582,12 @@ export function build() {
   // 生物群系的边不要是一条硬边。模糊一点，交界就像慢慢过渡的——
   // 而且 clip-path 在 filter 之后生效，海岸线照样是利的。
   o.push('<filter id="soft" x="-8%" y="-8%" width="116%" height="116%"><feGaussianBlur stdDeviation="0.11"/></filter>')
-  // 草地不是一块平色：底色换成一块平铺的草纹图案
-  o.push(grassPattern())
+  // 草地不是一块平色：底色换成一块平铺的草纹图案。四块陆地各一张（M-9）：
+  // 同一张草纹铺满全图的话，冻土、旱地、岛屿跟西岸草原一个颜色。
+  const landKeys = Object.keys(LANDS)
+  for (const key of landKeys) {
+    o.push(grassPattern(6.0, 36, 31337, landTone(key), 'grasstex-' + key))
+  }
   const peaks = []
   for (const [name, line, cnt, sc] of RIDGES) {
     for (let k = 0; k < cnt; k++) {
@@ -1127,16 +1603,21 @@ export function build() {
   }
 
   const land_d = []
+  const land_groups = []
   const coast_paths = []
   let si = 0
   for (const rings of Object.values(LANDS)) {
     let ri = 0
+    // 每块陆地自己一撮：填色时按块取图案（M-9）
+    const group = []
     for (const ring of rings) {
       const d = wob(ring, 0.13, 11 + si * 31 + ri * 7, 4)
       coast_paths.push(d)
       land_d.push(pd(d))
+      group.push(pd(d))
       ri += 1
     }
+    land_groups.push(group)
     si += 1
   }
   o.push(`<clipPath id="land"><path d="${land_d.join(' ')}"/></clipPath>`)
@@ -1178,8 +1659,11 @@ export function build() {
   for (const d of coast_paths) {
     o.push(`<path d="${pd(d)}" fill="none" stroke="${SEA_LO}" stroke-width="1.35" stroke-linejoin="round"/>`)
   }
-  for (const d of land_d) {
-    o.push(`<path d="${d}" fill="url(#grasstex)"/>`)
+  for (let li = 0; li < land_groups.length; li++) {
+    const key = landKeys[li]
+    for (const d of land_groups[li]) {
+      o.push(`<path d="${d}" fill="url(#grasstex-${key})"/>`)
+    }
   }
   // 草地的深浅斑：压在生物群系底下，只给草地添层次
   o.push('<g clip-path="url(#land)">')
@@ -1267,6 +1751,8 @@ export function build() {
   }
   // 世界奇观：压在地貌之上、地名与国名之下
   o.push(...wonders())
+  // 六个野地的记号（M-5）：跟奇观同一层——它们也是「图上有那么个地方」
+  o.push(...wilds())
   // 地名
   o.push(...labels())
   // 国家那一层：首都记号 + 徽记 + 一级国名（没有国界、没有色块）
@@ -1299,7 +1785,7 @@ export function build() {
 export const MAP_CSS =
   '.gf-map{display:block}' +
   '.gf-map .mnight{fill:var(--gf-dusk-color,#140D07);' +
-  'opacity:calc(var(--gf-dusk,0) * 0.55);pointer-events:none}' +
+  'opacity:calc(var(--gf-dusk,0) * 0.60);pointer-events:none}' +
   '.gf-map .mw{stroke:' + SEA_DASH + ';stroke-width:0.10;stroke-linecap:round;opacity:0.5}' +
   '.gf-map .mh{stroke:' + COAST + ';stroke-width:' + f3(INK2) + ';opacity:0.7}' +
   '.gf-map .mh2{stroke:' + COAST + ';stroke-width:' + f3(INK2) + ';opacity:0.45}' +

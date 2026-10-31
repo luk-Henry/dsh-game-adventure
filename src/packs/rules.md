@@ -153,9 +153,11 @@ import 七台引擎，`dangerOf` / `pickShards` / `worldLine` 改成读包里那
 （那一站**不带 `when`**，是路线的起点、也是兜底）。它同样**不认新项名**，判法直接复用 `momentHit`。
 内容住 `src/packs/adventure/journey.js`（十一站 / 每描一处少一分 / 今天打算干什么），校验是 **R21**
 （`checkJourney`）。**一个要记住的实情**：站号是从**今天**的景推的——存档只留今天（用户 m01403）、
-方案 A 不加跨天记忆（用户 m14810 第 4 条），所以今天走过乱石岗 / 夜哨，站号就落到**龙骨荒漠**；
+方案 A 不加跨天记忆（用户 m14810 第 4 条），所以今天走过乱石岗，站号就落到**龙骨荒漠**；
 它读起来像「他已经走到第九站」，其实只是「今天去过的地方对应到路线的哪一段」。**真正的进度条要有
 记忆**，那是第三期（或者改方案 A）的事。
+
+**2026-10-31 补两条不归 R21 的硬规矩**（R21 只查形状：`label` 非空、`seal` 非空、站数 ≥ 8、第一站不带条件、`when` 的键在 `places` / `scenes` 里）：① **站名必须是地图上真有的地名**——`src/map/world3.js` 的国名 / 地貌名，或世界包 `places` 的 `name.adventure`；第九站原来写「霜脊荒漠」，全仓只有那一处这么写，真名是 `龙骨荒漠`（`world3.js` 在 (49.4, 22.4)），而「霜脊」是北边那道山脉（(8.2, 4.4)）。② **两站的条件不许谁包含谁**——`stationOf` 从最后一站往前找，条件被后面那站整个盖住时，靠前那站永远轮不到；`sunken`（灰港）与 `sea`（珊瑚海国）同挂 `quench` 时，去一趟河湾两站同时成立、靠后的 `sea` 先中，`sunken` 一次没亮过。两条都由 `scripts/smoke.mjs` 钉住（逐站可达 / 判子集 / 站名查得到 / 地点键都在包里），**改站表时得自己想着，R21 不会替你拦**。
 
 **2026-10-10（用户 m16528 三条 ＋ m16552 定案，第八十六版）：命运整个重做，摆选项这一层搬到
 `forkOf` / `resultOf` 这两台新机器上。** 他嫌原来那两条路「**这种选择，不叫命运……代价远远不足以
@@ -249,7 +251,7 @@ scripts/packs.mjs               R10：规矩写错了在这里报（认不认识
                                 R18：命运抉择没份量在这里报（摆了岔口 weight 必须 ≥ 2；每条路的 cost 得是句号收尾、去标点后 ≥ 8 字的完整话；marks 1–2 样且认得出；两条路留的痕迹不许一模一样）
                                 R19：痕迹池太薄在这里报（六个痕迹一个不许少也不许多、每样三池、echo ≥ 4 句、另两池各 ≥ 2 句）
                                 R20：战斗写错了在这里报（对手至少 3 个、id 唯一、四池各至少 3 句、兜底对手正好一个且排最后；档位至少 2 档、trade 是 1–3 的整数、way/turn 是布尔、兜底档位排最后；turns 与 report 各至少 3 句且 report 每句必须带 {n}；条件里的场景键要真存在）
-                                R21：当日计划写错了在这里报（站至少 8 个、id 唯一、label 与 seal 非空、兜底正好一个且必须在最前面；lossAt 是两个递增整数且在 2..站数之间；losses 三段各至少 2 句；plans.plan 至少 3 句且每句必须带 {n} {place} {seal}；plans.season 四季各至少 2 句；条件里的场景键与地名要真存在）
+                                R21：当日计划写错了在这里报（站至少 8 个、id 唯一、label 与 seal 非空、兜底正好一个且必须在最前面；lossAt 是两个递增整数且在 2..站数之间；losses 三段各至少 2 句；plans.plan 至少 3 句且每句必须带 {n} {place} {seal}；plans.season 四季各至少 2 句；条件里的场景键与地名要真存在；但它只管形状——**站名是不是地图上真有的地名、两站条件有没有谁被谁整个盖住，R21 都管不着**，那两条由 `scripts/smoke.mjs` 的断言钉住）
 scripts/verify-rules.mjs       证明「这份数」=「client.js 里跑着的那段代码」
 ```
 
@@ -259,12 +261,12 @@ scripts/verify-rules.mjs       证明「这份数」=「client.js 里跑着的�
 ## 五、怎么证明没抄错
 
 规矩里的数字**原来**是从 `client.js` 的函数体里手抄的：抄错一个 9 或 12 不会报警，只会让「他挨打的概率」悄悄变样。
-**2026-10-08 接线之后**这件事换了个形状——面板算的就是这份数据本身（`src/client.js:24` 从 `src/packs/rules.js` import 八台引擎，`dangerOf` 只剩一层 `directionBias`），所以「手抄时抄错」从根上不可能再发生；真会发生的是另外两件：**接线被拆掉**、**语义被改坏**。这两件各由对应那一节拦：
+**2026-10-08 接线之后**这件事换了个形状——面板算的就是这份数据本身（`src/client.js:24` 从 `src/packs/rules.js` import 十一台引擎，`dangerOf` 只剩一层 `directionBias`），所以「手抄时抄错」从根上不可能再发生；真会发生的是另外两件：**接线被拆掉**、**语义被改坏**。这两件各由对应那一节拦：
 所以 `scripts/verify-rules.mjs` 在十万种处境组合上逐个对：
 
 ```
 node scripts/verify-rules.mjs
-✅ 世界的规矩与面板一致：危险 2940 格 · 世界句 58800 格 · 散列 4000 条 · 四档 paid(roll 11/12)、hurt(roll 11/12)、more(roll 21/12)、tail(roll 66/12) · 方向 2100 格 + 世界层 280 格（上限 hearth/risk/hearth/risk） · 选择点 480 格（again/back/blame/cross/finish/hold/home/leave/mark/own/push/seal/stop/take） · 归宿 6480 格（held-the-line/kept-at-it/on-the-road/paid-off/quiet-year/steady/thin-year/underground/walked-away） · 痕迹 6 个（wound/debt/fame/gain/lore/loss） · 战斗 450 格（brigands/dead/hired/orcs/wolves × big/mid/small） · 当日计划 192 格（ash/bell/bones/bridge/coffin/half/sea/stone/sunken/tree/well）
+✅ 世界的规矩与面板一致：危险 2940 格（接线） + 2940 格（照表重算，弄坏 else/cap 各能抓到 792/954 格） · 世界句 58800 格 · 散列 4000 条 · 四档 paid(roll 11/12)、hurt(roll 11/12)、more(roll 21/12)、tail(roll 66/12) · 方向 2100 格 + 世界层 280 格（上限 hearth/risk/hearth/risk） · 选择点 480 格（again/back/blame/cross/finish/hold/home/leave/mark/own/push/seal/stop/take） · 归宿 6480 格（held-the-line/kept-at-it/on-the-road/paid-off/quiet-year/steady/thin-year/underground/walked-away） · 痕迹 6 个（wound/debt/fame/gain/lore/loss） · 战斗 450 格（brigands/dead/hired/orcs/wolves × big/mid/small） · 当日计划 336 格（ash/bell/bones/bridge/coffin/half/sea/stone/sunken/tree/well） · 命运 2304 格（meet/pick/way）
 ```
 
 - 危险 2940 格 = 几点 × 几次报错 × 多久 × 在哪，**逐格相等**。这一节分两段：**§1** 比「面板算的」与
@@ -296,8 +298,8 @@ node scripts/verify-rules.mjs
 - **选择点那台机器（2026-10-08 加的，第五十三版）**也没有前身可比，而且它**没有新数可抄**
   （路用的还是 `minutes`/`fails`/`deliverables`）：`scripts/smoke.mjs` 拿两天夜袭问它
   （做得久那天守到天亮 `hold`、做得短那天退走 `leave`，两条路都走得到；没有事件就挑不出路来）；
-  `scripts/verify-rules.mjs` 自己再写一遍判法逐格对机器挑的那条路（**选择点 192 格**，
-  八条路一条不落），并给 `checkMoments` 九种坏岔口例子；`.tmp-acp/golden.mjs` 新加 **`road` 一组**
+  `scripts/verify-rules.mjs` 自己再写一遍判法逐格对机器挑的那条路（**选择点 480 格**，
+  十四条路一条不落），并给 `checkMoments` 九种坏岔口例子；`.tmp-acp/golden.mjs` 新加 **`road` 一组**
   （同一批 240 格记 `choiceOf(...)?.id`，事件没中就没有岔口）⇒ `post27 → post28` 老八组一字不差、
   只多这一维——**这一组同时也证明「岔口只住在事件里」**。`golden-diff.mjs` 也因此改了一处：
   老快照里没有的那一组按「这一轮新加的一维」报（`＋`），不再算失败。
@@ -391,12 +393,12 @@ node scripts/verify-rules.mjs
   `verify-packs` 照旧比它。
 
 - **当日计划那台机器（2026-10-10 加的，第八十四版）同样没有前身可比，也没有新数可抄**（它读的还是
-  `momentHit` 会的那几样信号，判法直接复用 `momentHit`）：`scripts/smoke.mjs` 那十三条里，
-  十处**直接问它**（十一站与「走得最远那一处说了算」/ 少一分三段 / 件数 2–4 / 赶路还是歇脚 /
+  `momentHit` 会的那几样信号，判法直接复用 `momentHit`）：`scripts/smoke.mjs` 那十八条里，
+  十五处**直接问它**（十一站与「走得最远那一处说了算」/ 少一分三段 / 件数 2–4 / 赶路还是歇脚 /
   四季按月份 / `stateAt` 那一整份 / 做到哪一步 / **歇脚一天最多一场、赶路才三场** / 第一句带站名与
   封印名 / 第二句是这一季的路），另三处管面板那一层（少一分那句在池子里、两句只长在日卷那一行、
   看两遍一字不变）；`scripts/verify-rules.mjs` **第 10 节**自己重写一遍判据（`journeyHit2` /
-  `journeyExpect`，**从后往前**找第一个全中的）逐格对拍 **192 格**（`地名 × 景 × 撞墙 × 交付`），
+  `journeyExpect`，**从后往前**找第一个全中的）逐格对拍 **336 格**（`地名 × 景 × 撞墙 × 交付`），
   另断言十一站一站不落，再给 `checkJourney` 七种坏表例子；`.tmp-acp/golden.mjs` 新加 **`plan` 一组**
   （864 格）⇒ `post41 → post42` **十一组一字不差** ＋ `＋ plan 864 条`——**`dayPlan` / `stateAt` 只住在
   渲染那一层，八台老机器一台没动**。这一版还顺手改了一处旧行为：`fightsFor` 多收一份计划，

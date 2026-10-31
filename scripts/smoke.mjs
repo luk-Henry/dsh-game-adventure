@@ -5,7 +5,9 @@
  * 它验证的是「有没有崩」，不是「好不好看」。
  */
 
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
@@ -223,7 +225,7 @@ const {
   CAST,
   CAST_LINES,
   CLASHES,
-  createGameflow,
+  createGameflow: createGameflowRaw,
   composeSequence,
   dangerOf,
   DAY_FRAME,
@@ -256,6 +258,7 @@ const {
   VIEW,
   VOICES,
   fetchRecords,
+  fetchStore,
   fightsFor,
   JOURNEY,
   seasonOf,
@@ -266,6 +269,13 @@ const {
   stateAt,
   OUT_KEYS,
 } = await import('../src/client.js')
+
+// 幕布（用户 m19006 / m19218）：今天还没按过「开始冒险」，见闻录一格都不铺。它只对**面板记得住
+// 东西**的机器生效（`picks.canSave` 假就不设，见 renderTimeline）——所以自检里绝大多数夹具
+// （不给 `storage`）照旧铺得开；给了假存储的那些，存储自己回答「今天已经按过」：
+// `freshStore()` 默认写上了，`storeStub` 单独回答 `dsh.gameflow.started` 这一个键，
+// 要看幕布的夹具自己把它删掉。
+const createGameflow = createGameflowRaw
 
 // 地图是**运行时现画出来的**（`src/map/world.js` 的 `mapSvg()`，见 `src/map/README.md`）。
 // 当年那张「画好的一整段 SVG」现在只剩一个身份：**回归夹具**，住在 `.scratch/map-data.js`
@@ -396,7 +406,20 @@ const checkOnFixture = (name, pass, extra = '') => {
 
 /* --- 翻译层：纯函数，先单独钉死 ------------------------------------- */
 
-const R = (over) => ({ startedAt: NOW - 60000, endedAt: NOW - 60000, minutes: 30, tags: [], ...over })
+// 夹具用的记录。**一定给它一个 id**：没有 id 的记录 `withIds` 会造 `anon-<开始时刻>`，
+// 景是按 `${id}|${act}|${n}|scene` 挑的（见 pickShards）——时刻跟着日历走，同一份夹具
+// 今天挑到机关坊、明天就挑到河湾，断言会随日期红绿（2026-10-24 撞见：「他在干什么：
+// 正在试法器」那条就是这么红的）。id 从内容算，内容一样就是同一条。
+const R = (over) => {
+  const base = { startedAt: NOW - 60000, endedAt: NOW - 60000, minutes: 30, tags: [], ...over }
+  if (base.id == null) {
+    const key = JSON.stringify([base.tags, base.counts || null, base.minutes, base.fails || 0])
+    let h = 2166136261
+    for (let i = 0; i < key.length; i += 1) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619) }
+    base.id = `r-${(h >>> 0).toString(36)}`
+  }
+  return base
+}
 
 // 他人在**落脚处**时，句子里不许再出现外头干活的那套东西——
 // 用户 2026-10-04 第 1 条：「现在他的位置在落脚点，那么需要做符合落脚点的事情」。
@@ -426,9 +449,11 @@ check('换一个已经没有的说法：退回默认那一套，句子照说',
   narrationFor([R({ tags: ['改文件'] })], NOW, 'ledger').line)
 check('他在干什么：正在试法器', narrationFor([R({ tags: ['跑命令'] })], NOW).place === 'workshop')
 check('他在干什么：主线挑「更像一件事」的那条',
-  narrationFor([R({ tags: ['改文件', '改文件', '查资料'] })], NOW).line
-  === narrationFor([R({ tags: ['改文件', '查资料'] })], NOW).line,
-  narrationFor([R({ tags: ['改文件', '查资料'] })], NOW).line)
+  // 两条夹具给**同一个 id**：句子是按 `${id}|${act}|${n}` 挑的，换 id 就换句，
+  // 这条要钉的是「两条记录挑出来的主活一样」，不是「两句话一样」。
+  narrationFor([R({ id: 'main-line', tags: ['改文件', '改文件', '查资料'] })], NOW).line
+  === narrationFor([R({ id: 'main-line', tags: ['改文件', '查资料'] })], NOW).line,
+  narrationFor([R({ id: 'main-line', tags: ['改文件', '查资料'] })], NOW).line)
 
 /* --- 四档结局（用户 m04700：不能老是「翻找无果、多少遍」）--------------- */
 
@@ -966,8 +991,12 @@ const SHAPES = HAVE_MAP_FIXTURE ? (MAP_SVG.match(/<(path|circle|rect|ellipse|lin
  * 死数据，烘进去反而少一层要对齐的东西（叠在上面的只剩记号、地名签、灯三样）。
  * 所以这条盯的变成「**随记录变的那一层**不许烘进去」——数量封顶，且不许有 tspan。 */
 const TEXTS = HAVE_MAP_FIXTURE ? (MAP_SVG.match(/<text\b/g) || []).length : 0
-checkOnFixture('地图里烘进去的字只有国名与地貌名（跟着记录变的那层仍然叠在外面）',
-  TEXTS > 0 && TEXTS <= 30 && !/<tspan/i.test(MAP_SVG || ''),
+/* 2026-10-27（地图审计 M-3）：封顶从 30 放到 60。原来那 30 是「当年图上只有 19 个国名与
+ * 地貌名」时拍的；现在二十座城的城名与九座二级国的国名也烘进来了（城画了却一个名字都
+ * 没有，M-3）。这条的本意没变：**随记录变的那一层不许烘进去**——所以仍要封顶、仍不许
+ * 有 tspan；变的只是「家具」数得清的上限。 */
+checkOnFixture('地图里烘进去的字只有国名、地貌名与城名（跟着记录变的那层仍然叠在外面）',
+  TEXTS > 0 && TEXTS <= 60 && !/<tspan/i.test(MAP_SVG || ''),
   HAVE_MAP_FIXTURE ? `${TEXTS} 个 <text> / ${(MAP_SVG.length / 1024).toFixed(0)} KB` : '')
 checkOnFixture('地图里没有位图（是画的，不是贴的图）',
   !/data:image|<image\b/i.test(MAP_SVG || ''))
@@ -1023,6 +1052,30 @@ for (const [id, theme] of Object.entries(THEMES)) {
       missing.length === 0, missing.length ? `缺 ${missing.join(' ')}` : `${THEME_KEYS.length} 个键`)
   }
 }
+/* 界面审计 U1/U7/U8 的根：某个主题**少定义一枚 token** 是无声的——`var()` 会静静落到
+   兜底值上。classics 就这样丢掉过地名字色（浅奶油压浅纸，1.16:1）、小标题（整片灰）、
+   地名签细边与地图凹槽（computed 直接 none），而没有任何断言会红。这里堵两个口子：
+
+   ① 凡是被读、而且**没写兜底**的 `--gf-*`，两套主题都必须自己定义（缺了就红）；
+   ② 有几枚**有兜底、但缺了会掉色**的（就是 U1/U7/U8 的现场），列成一张白名单，
+      两套主题同样必须自己给值——写兜底不等于可以不定义。 */
+const RUNTIME_TOKENS = new Set(['--gf-dusk', '--gf-glow', '--gf-crack-dim']) // JS 按钟点现写的，不归主题管
+const SHADOWABLE_TOKENS = [
+  '--gf-place-fg', '--gf-tag-fg', '--gf-k-fg', '--gf-head-fg', '--gf-week-fg',
+  '--gf-room-line', '--gf-stage-shadow', '--gf-grain', '--gf-door-filter',
+]
+const clientSource = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
+const noFallback = new Set()
+for (const hit of clientSource.matchAll(/var\((--gf-[a-z0-9-]+)([^)]*)\)/g)) {
+  if (!hit[2].trimStart().startsWith(',')) noFallback.add(hit[1])
+}
+for (const [id, theme] of Object.entries(THEMES)) {
+  const missing = [...new Set([...noFallback, ...SHADOWABLE_TOKENS])]
+    .filter((key) => !RUNTIME_TOKENS.has(key) && !theme.tokens[key])
+  check(`${id} 主题把该自己定义的 token 都定义了（缺一枚会静静落到兜底上，没人知道）`,
+    missing.length === 0, missing.length ? `缺 ${missing.join(' ')}` : `${noFallback.size} 枚没兜底 + ${SHADOWABLE_TOKENS.length} 枚掉色的，都齐`)
+}
+
 // 深色那层只该改「木料与铜」（底色、字色、线、影），不该重画地图——
 // 地图要暗是**天黑了**那件事，由 applyDaylight / dimForDusk 按钟点压，不是 DSH 的深色开关。
 check('深色那层是覆盖层，不重画地图（地图的暗归钟点管）',
@@ -1035,7 +1088,9 @@ check('深色那层是覆盖层，不重画地图（地图的暗归钟点管）'
 
 /* --- 记号：他此刻在地图上的哪个点 ----------------------------------- */
 // 平面地图上记号就直接钉在门口那个坐标上，再往上抬一点点。
-const pinAt = ([dx, dy]) => `translate(${dx.toFixed(1)} ${(dy - 0.3).toFixed(1)})`
+// 2026-10-31（t29）：记号搬进 HTML 那一层之后它没有 `transform` 属性可咬了（位置在
+// `style.transform` 上、单位是像素），所以改咬元素上记着的那对世界坐标（`data-at`）。
+const pinAt = ([dx, dy]) => `${dx.toFixed(1)},${dy.toFixed(1)}`
 // 2026-10-08：并进户外的活（描残咒 / 下矿坑 / 查夜哨…）之后，一个动作挑到哪件事是掷骰子，
 // 「记号落在哪个点」不再由动作单独决定（挑到户外的活记号要收起来，见下一条）。
 // 这一节验的是**记号机制**本身，所以直接喂一个说清楚的 narration：给哪个地方，就钉在哪个门口。
@@ -1044,13 +1099,13 @@ check('六个动作在地图上给出六个不同的点（人真的会挪）',
   new Set(ACTION_TAGS.map((t) => {
     const stage = buildStage()
     renderStage(stage, nowAt(t))
-    return stage.pin.getAttribute('transform')
+    return stage.pin.getAttribute('data-at')
   })).size === ACTION_TAGS.length)
 check('记号就钉在他那道门口',
   (() => {
     const stage = buildStage()
     renderStage(stage, nowAt('翻文件'))
-    return stage.pin.getAttribute('transform') === pinAt(PLACES.archive.door)
+    return stage.pin.getAttribute('data-at') === pinAt(PLACES.archive.door)
   })())
 // 2026-10-08（第三十六版）：原来这条叫「出门了记号就收起来」——用户看见的正是
 // 这个（「角色标记不见了，他又跑了界外去了？？」）。现在反过来：出门了记号照在，
@@ -1059,7 +1114,7 @@ check('出门了记号照在，钉在落脚处（data-place 是 home）',
   (() => {
     const stage = buildStage()
     renderStage(stage, narrationFor([{ startedAt: NOW - 9 * 3600 * 1000, endedAt: NOW - 5 * 3600 * 1000, minutes: 33, tags: ['改文件'] }], NOW))
-    return stage.pin.getAttribute('opacity') === '1' && stage.pin.getAttribute('data-place') === 'home'
+    return stage.pin.style.opacity === '1' && stage.pin.getAttribute('data-place') === 'home'
   })())
 
 /* --- 他不在两地之间瞬移（2026-10-05 用户第 1 条）--------------------- *
@@ -1083,7 +1138,7 @@ check('位置变了就从上一个地方出发（不是凭空出现在新地方�
     renderStage(stage, nowAt('翻文件'), 'adventure', 'home')
     return stage.pin.getAttribute('data-from') === 'home'
       && stage.pin.getAttribute('data-place') === 'archive'
-      && stage.pin.getAttribute('transform') === pinAt(PLACES.archive.door)
+      && stage.pin.getAttribute('data-at') === pinAt(PLACES.archive.door)
   })())
 check('第一次画的时候没有「上一个地方」这回事',
   (() => {
@@ -1109,7 +1164,7 @@ check('上一次也是这个地方，就不重复走一趟',
 // 一个 transform 都不写——只有记号/灯/地名签那一层要一个反缩放（见下面那条断言）。
 // 自检的垫片没有 getBoundingClientRect，`clientWidth` 给的是 350，所以像素↔世界的比例
 // 全图是 350/66、细节版是 350/22——下面喂指针坐标时按这两个换算。
-const { build_local, focusAt } = await import('../src/map/local.js')
+const { build_local, focusAt, check: localCheck, FOCUS: LOCAL_FOCUS } = await import('../src/map/local.js')
 const PXU = 350 / 66 // 全图：1 世界单位 = 350/66 像素
 const PXZ = 350 / 22 // 细节版：1 世界单位 = 350/22 像素
 /** 七个地点各钉在哪座城——细节版聚到的那座必须是同一座。 */
@@ -1503,13 +1558,13 @@ const pinZoomProbe = (() => {
       && /^translate\(/.test(String(t)) && /scale\(0\.3333/.test(String(t))
       && Math.abs(on[0] - hx) < 0.02 && Math.abs(on[1] - hy) < 0.02
       && Math.abs(near[0] - (hx + 1)) < 0.02
-      && s.pin.getAttribute('transform') === want
+      && s.pin.getAttribute('data-at') === want
       && Number(s.miniDot.getAttribute('cx')) === hx
       && Number(s.miniDot.getAttribute('cy')) === hy,
     read: `全图时记号那一层 ${before}（该是没有）／细节版里 ${t}`
       + `／他脚下那块地落回 ${on.map((v) => v.toFixed(2)).join(',')}（该是 ${hx},${hy}）`
       + `／离他 3 个单位的点缩到 ${near[0].toFixed(2)}（该是 ${(hx + 1).toFixed(2)}）`
-      + `／记号自己还是 ${s.pin.getAttribute('transform')}／小全图上的点 ${s.miniDot.getAttribute('cx')},${s.miniDot.getAttribute('cy')}`,
+      + `／记号自己还是 ${s.pin.getAttribute('data-at')}／小全图上的点 ${s.miniDot.getAttribute('cx')},${s.miniDot.getAttribute('cy')}`,
   }
 })()
 
@@ -1931,7 +1986,7 @@ const nightProbe = (() => {
     ok: !!grad && grad.tagName === 'RADIALGRADIENT'
       && grad.getAttribute('gradientUnits') === 'userSpaceOnUse'
       && stops === 4 && ops === '0,0.06,0.52,1'
-      && deep.join(',') === '10.50,18.99,7.16' && noon === '9.50',
+      && deep.join(',') === '10.50,18.99,5.76' && noon === '9.20',
     read: `${grad && grad.tagName} ${stops} 个 stop（${ops}）／`
       + `深夜 圆心 ${deep.slice(0, 2).join(',')} r=${deep[2]}／正午 r=${noon}`,
   }
@@ -1939,8 +1994,8 @@ const nightProbe = (() => {
 
 check('夜里那圈光池以他为中心，半径随时辰收放（脚下亮、远处才暗）',
   nightProbe.ok, nightProbe.read)
-check('夜罩改用那圈渐变，而且比原来淡一点（0.55 → 0.45）',
-  /#gf-world \.mnight \{ fill: url\(#gf-night\); opacity: calc\(var\(--gf-dusk,0\) \* 0\.45\); \}/.test(CSS)
+check('夜罩改用那圈渐变，深夜压得够黑（2026-10-30 地图审计 M-12：0.45 → 0.52）',
+  /#gf-world \.mnight \{ fill: url\(#gf-night\); opacity: calc\(var\(--gf-dusk,0\) \* 0\.52\); \}/.test(CSS)
   && /#gf-night stop \{ stop-color: var\(--gf-dusk-color, #140D07\); \}/.test(CSS))
 // 第四十三版：细节版那张地方图**也走那圈渐变**。
 // 原来它吃的是 MAP_CSS 里那条平面色 `.gf-map .mnight`（`#140D07`、0.55 × dusk），
@@ -1948,8 +2003,8 @@ check('夜罩改用那圈渐变，而且比原来淡一点（0.55 → 0.45）',
 // 等于把亮着的地面压暗 25%。特异性 (0,3,0) 压得过 MAP_CSS 的 (0,2,0)。
 // 第五十六版起两级共用**同一条** `gf-night`：它是世界坐标的渐变，两级都直接吃。
 check('细节版那张地方图的夜罩也走那圈渐变（不再把亮着的地面压暗）',
-  /\.gf-map\.gf-zoom-local \.mnight \{ fill: url\(#gf-night\); opacity: calc\(var\(--gf-dusk,0\) \* 0\.45\); \}/.test(CSS)
-  && /#gf-zoom \.mnight \{ fill: url\(#gf-night\); opacity: calc\(var\(--gf-dusk,0\) \* 0\.45\); \}/.test(CSS))
+  /\.gf-map\.gf-zoom-local \.mnight \{ fill: url\(#gf-night\); opacity: calc\(var\(--gf-dusk,0\) \* 0\.52\); \}/.test(CSS)
+  && /#gf-zoom \.mnight \{ fill: url\(#gf-night\); opacity: calc\(var\(--gf-dusk,0\) \* 0\.52\); \}/.test(CSS))
 /* 这里原来有一条「镜内那圈光池按镜子的映射倒推」（第四十三～四十七版）：镜子是钉在
    鼠标底下的一个圆，镜内那层被 `scale(3)` 放大过，所以光池的圆心与半径都得倒推。
    第五十六版换成两级地图之后整条不需要了——细节版是换 viewBox 换出来的，
@@ -2134,8 +2189,13 @@ check('天快亮的时候还暗着', daylight(6).dusk > 0 && daylight(6).glow < 
 // 所以塞一个假存储进去，好把「记下来了」「下次打开自己装上」这两件事都钉住
 // （键名由插件自己定，这里不写死——下面从存储里反着读）。
 const worldStore = new Map()
+// 幕布（用户 m19006 / m19218）：今天还没按过「开始冒险」，见闻录一格都不铺。这一节看的是
+// **按过之后**的画面，所以 `dsh.gameflow.started` 这个键单独给一个回答——**不写进
+// `worldStore`**：下面那些「挑过的说法记下来了」会去点存储里的键，多一个键就红
+// （2026-10-19 撞过一次，别再把这一笔塞进 Map 里）。
+const stubStart = String(new Date(NOW).setHours(0, 0, 0, 0))
 const storeStub = {
-  getItem: (k) => (worldStore.has(k) ? worldStore.get(k) : null),
+  getItem: (k) => (k === 'dsh.gameflow.started' ? stubStart : worldStore.has(k) ? worldStore.get(k) : null),
   setItem: (k, v) => { worldStore.set(k, String(v)) },
   removeItem: (k) => { worldStore.delete(k) },
 }
@@ -2177,7 +2237,17 @@ check('「时间」「位置」这两个标签不再出现（值本身已经是�
   host.all('gf-k').map((n) => n.textContent).join('/'))
 check('此刻后面是 24 小时的钟点（用户 m03745 要的 09:47 那种）',
   host.all('gf-v')[0]?.textContent === '16:40', host.all('gf-v')[0]?.textContent)
-check('再后面是地名（值还在，只是不挂标签了）', host.all('gf-v')[1]?.textContent === '古林书斋', host.all('gf-v')[1]?.textContent)
+// 2026-10-25：这一行指着哪儿**从记录里推**，不再写死「古林书斋」。
+// 根因（2026-10-25 定位）：面板画记号用的是 `narrationFor(...).place`，那**不是** `placeOf`——
+// 第四十版起「出门的活各有野地落点」，`narrationFor` 走 `hit.place` 会落到 `ruin` / `mine` /
+// `quench` 这些**野地**上，而 `placeOf` 只认 `ACTION_PLACE[act]`（城里那间屋子）。拿 `placeOf`
+// 反推期望值，等于用另一套判据去猜面板的结果，池子一动就假红（这就是那六条红的来路）。
+// 现在照 `renderStage` 里那行 `const at = PLACES[narration.place] || PLACES.home` 推。
+const PIN_AT = PLACES[narrationFor(demo, NOW).place] || PLACES.home
+const PIN_PLACE = PIN_AT.id
+const PIN_NAME = placeName(PIN_PLACE, 'adventure')
+const PIN_DOOR = PIN_AT.door || [0, 0]
+check('再后面是地名（值还在，只是不挂标签了）', host.all('gf-v')[1]?.textContent === PIN_NAME, host.all('gf-v')[1]?.textContent)
 check('两者中间有一枚中点（一行读完，不必读标签）', host.all('gf-sep').length === 1)
 
 /* --- 那间屋子 ------------------------------------------------------- */
@@ -2193,10 +2263,11 @@ check('地图真的是画出来的（几千个形状，不是一张图）',
     + stage.allTag('line').length + stage.allTag('polyline').length
     + stage.allTag('polygon').length) > 2000,
   `${stage.allTag('path').length} path / ${stage.allTag('circle').length} circle / ${stage.allTag('line').length} line`)
-check('地图是一整块地（大地图一张 svg ＋ 记号那张自己的 svg ＋ 角落那张小全图 ＋ 右上角那枚图钉的图标，小图只在细节版里露出来）',
-  stage.allTag('svg').length === 4 && stage.all('gf-mini').length === 1
-  && stage.all('gf-always-icon').length === 1 && stage.all('gf-overlay-svg').length === 1,
-  `${stage.allTag('svg').length} 张 svg（记号那张 ${stage.all('gf-overlay-svg').length} 张、小全图 ${stage.all('gf-mini').length} 张、图钉图标 ${stage.all('gf-always-icon').length} 张）`)
+check('地图是一整块地（大地图一张 svg ＋ 地名签那张自己的 svg ＋ 角落那张小全图 ＋ 右上角那枚图钉的图标 ＋ 记号里那枚图钉的小 svg，小图只在细节版里露出来）',
+  stage.allTag('svg').length === 5 && stage.all('gf-mini').length === 1
+  && stage.all('gf-always-icon').length === 1 && stage.all('gf-overlay-svg').length === 1
+  && stage.all('gf-pin-glyph').length === 1,
+  `${stage.allTag('svg').length} 张 svg（地名签那张 ${stage.all('gf-overlay-svg').length} 张、小全图 ${stage.all('gf-mini').length} 张、图钉图标 ${stage.all('gf-always-icon').length} 张、记号里的图钉 ${stage.all('gf-pin-glyph').length} 张）`)
 check('地图上有灯（夜里那盏）', stage.all('gf-lamp-glow-1').length === 1)
 check('地图上有个记号指着他现在在哪儿', stage.all('gf-pin').length === 1)
 /* 记号的位置写在 transform 属性上，而「一起一落」是一条 CSS 动画——**CSS 的 transform 会整个
@@ -2210,28 +2281,38 @@ check('灯也一样：闪的是内层，外层留着属性控「他不在就没�
 check('CSS 里没有任何一条动画落在带定位的组上',
   !/\.gf-pin\s*\{[^}]*animation/.test(shadow.allTag('style').map((s) => s.textContent).join('\n'))
   && !/\.gf-lamp-glow\s*\{[^}]*animation/.test(shadow.allTag('style').map((s) => s.textContent).join('\n')))
-check('记号是亮出来的', stage.all('gf-pin')[0]?.getAttribute('opacity') === '1',
-  String(stage.all('gf-pin')[0]?.getAttribute('opacity')))
-check('记号落在他待的那栋房子上（改文件 → 古林书斋）',
-  stage.all('gf-pin')[0]?.getAttribute('data-place') === 'scriptorium',
+check('记号是亮出来的', stage.all('gf-pin')[0]?.style.opacity === '1',
+  String(stage.all('gf-pin')[0]?.style.opacity))
+check(`记号落在他待的那一处（改文件 → ${PIN_NAME}）`,
+  stage.all('gf-pin')[0]?.getAttribute('data-place') === PIN_PLACE,
   String(stage.all('gf-pin')[0]?.getAttribute('data-place')))
 check('记号就钉在他那道门口（不是随便飘在图上）',
-  stage.all('gf-pin')[0]?.getAttribute('transform') === pinAt(PLACES.scriptorium.door),
-  `${stage.all('gf-pin')[0]?.getAttribute('transform')} / 期望 ${pinAt(PLACES.scriptorium.door)}`)
+  stage.all('gf-pin')[0]?.getAttribute('data-at') === pinAt(PIN_DOOR),
+  `${stage.all('gf-pin')[0]?.getAttribute('data-at')} / 期望 ${pinAt(PIN_DOOR)}`)
 check('地名写在图下面那行字里',
-  host.all('gf-v')[1]?.textContent === '古林书斋',
+  host.all('gf-v')[1]?.textContent === PIN_NAME,
   host.all('gf-v')[1]?.textContent)
 // 用户 2026-10-03：「地图上看不到他在哪，需要一个标注。」
 // 记号旁边贴一个地名——位置跟着记号走，靠画布边缘会自动翻到另一边。
 check('记号旁边贴着地名', stage.all('gf-place')[0]?.getAttribute('opacity') === '1',
   String(stage.all('gf-place')[0]?.getAttribute('opacity')))
 check('贴的就是他此刻在的那个地方',
-  stage.all('gf-place-text')[0]?.textContent === '古林书斋',
+  stage.all('gf-place-text')[0]?.textContent === PIN_NAME,
   stage.all('gf-place-text')[0]?.textContent)
+// 2026-10-30 M-4：落点改成「躲开图上已有的字与记号」（`placeLabel`），所以不再咬死
+// 「右移 3.0」这个具体数——咬的是**它还贴着这枚记号**（不超过 14 个世界单位），
+// 并且没有跑到画布外。躲的时候会绕到别的方向，那是这一轮的用意。
 check('标签跟着记号走（不钉在画布角落）', (() => {
-  const [px, py] = PLACES.scriptorium.door
-  const x = Number(stage.all('gf-place-bg')[0]?.getAttribute('x'))
-  return Math.abs(x - (px + 3.0)) < 0.05 && Number(stage.all('gf-place-bg')[0]?.getAttribute('y')) < py
+  const [px, py] = PIN_DOOR
+  const bg = stage.all('gf-place-bg')[0]
+  const x0 = Number(bg.getAttribute('x'))
+  const y0 = Number(bg.getAttribute('y'))
+  const w = Number(bg.getAttribute('width'))
+  const h = Number(bg.getAttribute('height'))
+  const cx = x0 + w / 2
+  const cy = y0 + h / 2
+  const far = Math.max(Math.abs(cx - px), Math.abs(cy - py))
+  return far < 14 && x0 >= bx - 0.5 && x0 + w <= bx + bw + 0.5
 })(), `${stage.all('gf-place-bg')[0]?.getAttribute('x')},${stage.all('gf-place-bg')[0]?.getAttribute('y')}`)
 check('靠右边就翻到记号左边，不会掉出画布', (() => {
   const bg = stage.all('gf-place-bg')[0]
@@ -2318,8 +2399,8 @@ const nightStage = document.body.children.filter((c) => 'data-dsh-gameflow' in c
 // 地名签收起来、地点那行写「地图外面」）。用户拍的是「角色必须一直显示在地图上」，
 // 所以现在记号照在、`data-place` 是 `home`、地名签与状态行都写「落脚处」。
 check('出门了他也在图上（记号照亮）',
-  nightStage.all('gf-pin')[0]?.getAttribute('opacity') === '1',
-  String(nightStage.all('gf-pin')[0]?.getAttribute('opacity')))
+  nightStage.all('gf-pin')[0]?.style.opacity === '1',
+  String(nightStage.all('gf-pin')[0]?.style.opacity))
 check('出门了钉在落脚处（data-place 是 home）',
   nightStage.all('gf-pin')[0]?.getAttribute('data-place') === 'home',
   String(nightStage.all('gf-pin')[0]?.getAttribute('data-place')))
@@ -2365,13 +2446,21 @@ check('右边是他的说法，跟左边一一对上',
     // 2026-10-05 起第一枚是**这一行句子里真正在讲的那件事**（场景词，见 SCENES），
     // 后面才轮到各标签翻译出来的说法——所以不能再按位置一一对号，改成「都在并集里、
     // 不重复、头一枚属于主线那个动作」。
+    // 2026-10-25：并集得把**场景词**一起算进去——那一枚本来就不在 `words` 里
+    // （它是 `SCENES[语气][动作][i].w`），只查 `words` 会把正确的输出判成假红。
+    // 而 `SCENES` 的形状是 `{ 语气: { 动作: [{key, w, lead, tail}, …] } }`——两层对象套数组，
+    // 只 `.flat()` 一层拿到的是「动作 → 数组」那个对象，`.map(s => s.w)` 全是 undefined，
+    // 等于这一条一直是哑的（2026-10-25 定位到这一处）。
     const got = rows[0].all('gf-him-col')[0].all('gf-tag').map((t) => t.textContent)
     const keys = ['改文件', '跑命令', '翻文件']
+    const scenes = new Set(
+      Object.values(SCENES).flatMap((byAct) => Object.values(byAct)).flat().map((s) => s.w),
+    )
     const union = keys.flatMap((k) => ADV_WORDS[k])
     return got.length > 0 && got.length <= 3
       && new Set(got).size === got.length
-      && got.every((w) => union.includes(w))
-      && ADV_WORDS['改文件'].includes(got[0])
+      && got.every((w) => union.includes(w) || scenes.has(w))
+      && (ADV_WORDS['改文件'].includes(got[0]) || scenes.has(got[0]))
   })(),
   rows[0].all('gf-him-col')[0].all('gf-tag').map((t) => t.textContent).join('/'))
 check('左边不再重复报「动了几个文件」', rows[0].all('gf-meta').length === 0)
@@ -2860,14 +2949,14 @@ check('无效主题被忽略', gf.theme === 'plain')
 // 2026-10-05 起「案牍」那套被用户摘掉了，所以这一节验的是「给一个表里没有的说法会
 // 怎样」：安静地退回默认那一套，什么都不动（2026-10-06 起表里是冒险 + 船家两套）。
 const lineBefore = host.all('gf-remark').map((n) => n.textContent)
-const placeBefore = host.all('gf-pin')[0].getAttribute('transform')
+const placeBefore = host.all('gf-pin')[0].getAttribute('data-at')
 const placeNameBefore = host.all('gf-v')[1].textContent
 gf.setVoice('ledger')
 check('给一个已经没有的说法：退回默认那一套', gf.voice === 'adventure', gf.voice)
 check('退回之后，见闻录一句话都没动',
   host.all('gf-remark').map((n) => n.textContent).join() === lineBefore.join())
 check('他站的地方一动不动（说法不改地理）',
-  host.all('gf-pin')[0].getAttribute('transform') === placeBefore)
+  host.all('gf-pin')[0].getAttribute('data-at') === placeBefore)
 check('地名也一动不动', host.all('gf-v')[1].textContent === placeNameBefore,
   `${placeNameBefore} → ${host.all('gf-v')[1].textContent}`)
 check('那句话也照旧', (host.all('gf-nowish')[0]?.textContent || '') === NEWEST_LINE)
@@ -3044,7 +3133,7 @@ const styleBefore = {
   id: gf.style,
   theme: gf.theme,
   place: host.all('gf-v')[1].textContent,
-  pin: host.all('gf-pin')[0].getAttribute('transform'),
+  pin: host.all('gf-pin')[0].getAttribute('data-at'),
   you: host.all('gf-you').map((n) => n.textContent).join('|'),
   rows: host.all('gf-row').length,
   svg: host.allTag('svg').length,
@@ -3068,8 +3157,8 @@ check('只换说法：地名一个字不动（用户第 2 条）',
   host.all('gf-v')[1].textContent === styleBefore.place,
   `${styleBefore.place} → ${host.all('gf-v')[1].textContent}`)
 check('只换说法：记号一动不动（人还站在同一个地方）',
-  host.all('gf-pin')[0].getAttribute('transform') === styleBefore.pin,
-  `${styleBefore.pin} → ${host.all('gf-pin')[0].getAttribute('transform')}`)
+  host.all('gf-pin')[0].getAttribute('data-at') === styleBefore.pin,
+  `${styleBefore.pin} → ${host.all('gf-pin')[0].getAttribute('data-at')}`)
 check('只换说法：主题不动（换的是谁在讲，不是这个世界）',
   gf.theme === styleBefore.theme
   && host.all('gf-root')[0].getAttribute('data-theme') === styleBefore.theme,
@@ -3093,7 +3182,7 @@ styleOf('adventure').dispatch('click')
 check('点回来还是原来那套说法', gf.style === styleBefore.id, gf.style)
 check('点回来，地名、记号、主题都回到原样',
   host.all('gf-v')[1].textContent === styleBefore.place
-  && host.all('gf-pin')[0].getAttribute('transform') === styleBefore.pin
+  && host.all('gf-pin')[0].getAttribute('data-at') === styleBefore.pin
   && gf.theme === styleBefore.theme,
   `${host.all('gf-v')[1].textContent} / ${gf.theme}`)
 check('记的是「现在讲哪一套」，不是「换过哪几套」',
@@ -3176,8 +3265,8 @@ check('没有任何记录时两栏表头也收起来', emptyHost.all('gf-cols-he
 // 2026-10-08（第三十六版）：一条记录都没有的时候也一样——记号照在，钉在落脚处。
 // 原来这两条断言的是「没有记号」与「地图外面」，跟用户拍的「角色必须一直显示在
 // 地图上」直接冲突。
-check('没有任何记录时记号也在（钉在落脚处）', emptyHost.all('gf-pin')[0]?.getAttribute('opacity') === '1',
-  String(emptyHost.all('gf-pin')[0]?.getAttribute('opacity')))
+check('没有任何记录时记号也在（钉在落脚处）', emptyHost.all('gf-pin')[0]?.style.opacity === '1',
+  String(emptyHost.all('gf-pin')[0]?.style.opacity))
 check('没有任何记录时地点那行写「他的屋子」', emptyHost.all('gf-v')[1]?.textContent === '他的屋子',
   String(emptyHost.all('gf-v')[1]?.textContent))
 
@@ -3251,7 +3340,7 @@ check('走 ctx.effect 注册（路由 + 定时落盘，都可清理）', seen.ef
 /* ---- 定时落盘：第三轮加的（m02673「好，要。」） ---- */
 // 成本：宿主只读事件、做加减法、写 JSON，一次模型调用都没有，所以是零 token。
 check('落盘间隔是 5 分钟（零 token）', PERSIST_INTERVAL_MS === 5 * 60 * 1000, String(PERSIST_INTERVAL_MS))
-check('存储版本号是 8（加字段就 +1，回填才会重跑）', STORE_VERSION === 8, String(STORE_VERSION))
+check('存储版本号是 9（加字段就 +1，回填才会重跑）', STORE_VERSION === 9, String(STORE_VERSION))
 
 /* ---- 旧日子真删（用户 m01403 第 2 条「旧日子删除」） ---- *
  * 交出去、写回盘的记录只剩今天，但两件「接缝」要留下：`since`（这份存档的头一天，
@@ -3413,8 +3502,9 @@ check('POST 回 404', post.code === 404)
 
   // 假请求：监听一挂上就把数据与结束事件推过去（真实 http 是先挂监听再来数据，
   // 但这里没必要真等 tick——读到空 body 会变成 400，反而测不到想测的东西）
-  const fakeReq = (method, url, body = null) => {
-    const req = { method, url, destroy() {} }
+  // `socket.remoteAddress` 也要给：量尺寸那条路只认本机回环（见下面「只收本机」那条）。
+  const fakeReq = (method, url, body = null, remoteAddress = '127.0.0.1') => {
+    const req = { method, url, socket: { remoteAddress }, destroy() {} }
     req.on = (type, fn) => {
       if (type === 'data' && body !== null) queueMicrotask(() => fn(Buffer.from(body)))
       if (type === 'end') queueMicrotask(() => fn())
@@ -3450,10 +3540,106 @@ check('POST 回 404', post.code === 404)
   await seen.registered.handler(fakeReq('POST', '/dsh-gameflow/measure', '{这不是 JSON'), bad)
   check('量尺寸：body 不是 JSON 回 400（不把宿主绊倒）', bad.code === 400, String(bad.code))
 
+  // 取证通道只给本机：外面的来源一律 403（不是鉴权体系，是一道门闩）
+  const outside = fakeRes()
+  await seen.registered.handler(fakeReq('GET', '/dsh-gameflow/measure', null, '10.1.2.3'), outside)
+  check('量尺寸：非本机来源回 403（取证通道不出门）', outside.code === 403, String(outside.code))
+  const outsidePost = fakeRes()
+  await seen.registered.handler(fakeReq('POST', '/dsh-gameflow/measure', JSON.stringify({ panel: {} }), '::ffff:10.1.2.3'), outsidePost)
+  check('量尺寸：非本机来源连 POST 也进不来', outsidePost.code === 403, String(outsidePost.code))
+  const loop6 = fakeRes()
+  await seen.registered.handler(fakeReq('GET', '/dsh-gameflow/measure', null, '::1'), loop6)
+  check('量尺寸：IPv6 回环也认（::1）', loop6.code === 200 && JSON.parse(loop6.body).on === true, String(loop6.body))
+  check('量尺寸：写盘是原子的（目录里不留 .tmp）',
+    readdirSync(join(process.env.DSH_HOME, 'gameflow', 'measure')).every((n) => !n.endsWith('.tmp')),
+    readdirSync(join(process.env.DSH_HOME, 'gameflow', 'measure')).join(','))
+
   rmSync(switchPath, { force: true })
   const again = fakeRes()
   await seen.registered.handler(fakeReq('GET', '/dsh-gameflow/measure'), again)
   check('量尺寸：删掉开关文件就停', JSON.parse(again.body).on === false, String(again.body))
+}
+
+// ---------------------------------------------------------------------------
+// 按下「开始冒险」＝这一天的起点（8 → 9，用户 m04200）：
+// 宿主那条写路由把起点记进存档，并把「在它之前就结束」的记录删掉
+// ---------------------------------------------------------------------------
+{
+  const storePath = join(process.env.DSH_HOME, 'gameflow', 'records.json')
+  const startAt = at(0, 20, 7)
+  const mkRec = (id, from, to, minutes) => ({
+    id,
+    startedAt: from,
+    endedAt: to,
+    minutes,
+    actions: 1,
+    tags: ['改文件'],
+    counts: { 改文件: 1 },
+    files: ['D:\\x\\a\\a.js'],
+    ticks: [{ at: from, actions: 1, counts: { 改文件: 1 }, files: ['D:\\x\\a\\a.js'], fails: 0, tags: ['改文件'] }],
+  })
+  // 一条在起点之前就结束（该删），一条跨过起点（该留）。version 写 9，免得触发回填。
+  const seed = {
+    version: STORE_VERSION,
+    since: at(3, 0, 0),
+    seam: null,
+    dayStart: 0,
+    records: [mkRec('before-start', at(0, 19, 55), at(0, 20, 0), 5), mkRec('after-start', at(0, 20, 6), at(0, 20, 10), 4)],
+  }
+  writeFileSync(storePath, JSON.stringify(seed), 'utf8')
+
+  const reqOf = (method, url, body = null, remoteAddress = '127.0.0.1') => {
+    const req = { method, url, socket: { remoteAddress }, destroy() {} }
+    req.on = (type, fn) => {
+      if (type === 'data' && body !== null) queueMicrotask(() => fn(Buffer.from(body)))
+      if (type === 'end') queueMicrotask(() => fn())
+      return req
+    }
+    return req
+  }
+
+  const readStoreNow = () => JSON.parse(readFileSync(storePath, 'utf8'))
+
+  const pressed = fakeRes()
+  await seen.registered.handler(reqOf('POST', '/dsh-gameflow/start', JSON.stringify({ at: startAt })), pressed)
+  const pressedBody = JSON.parse(pressed.body || '{}')
+  check('按下开始冒险：路由回 200 + ok（界面只在真的写成时才掀幕布）',
+    pressed.code === 200 && pressedBody.ok === true, String(pressed.body))
+  check('按下开始冒险：存档里记下 dayStart（与 since/seam 并列）',
+    readStoreNow().dayStart === startAt, String(readStoreNow().dayStart))
+  check('按下开始冒险：起点之前就结束的记录被删掉，跨过起点的那条留着',
+    readStoreNow().records.map((r) => r.id).join(',') === 'after-start' && pressedBody.dropped >= 1,
+    `${readStoreNow().records.map((r) => r.id).join(',')} / dropped=${pressedBody.dropped}`)
+
+  const recordsAfter = fakeRes()
+  await seen.registered.handler(reqOf('GET', '/dsh-gameflow/records'), recordsAfter)
+  const polled = JSON.parse(recordsAfter.body || '{}')
+  check('取数据的应答带上 dayStart（界面靠它裁掉起点之前那几格）',
+    polled.dayStart === startAt && polled.records.map((r) => r.id).join(',') === 'after-start',
+    String(polled.dayStart))
+
+  // 起点跨天就作废：昨天按的不该把今天也裁了（pruneStore 里那道 startOfDay 比较）。
+  const crossed = pruneStore(
+    [{ id: 'x', startedAt: at(0, 9, 0), endedAt: at(0, 9, 30), minutes: 30, actions: 1, tags: [], counts: {}, files: [] }],
+    { since: at(3, 0, 0), seam: null, dayStart: at(1, 20, 7) },
+    at(0, 9, 40),
+  )
+  check('起点跨了午夜就当没有（昨天按的不裁今天）',
+    crossed.dayStart === 0 && crossed.records.length === 1, `${crossed.dayStart} / ${crossed.records.length}`)
+
+  // 不许乱按：非 POST、坏 JSON、缺 at、非本机回环——四种都该被挡在门外。
+  const wrongMethod = fakeRes()
+  await seen.registered.handler(reqOf('GET', '/dsh-gameflow/start'), wrongMethod)
+  check('按下开始冒险：GET 回 405（它是写路由）', wrongMethod.code === 405, String(wrongMethod.code))
+  const badJson = fakeRes()
+  await seen.registered.handler(reqOf('POST', '/dsh-gameflow/start', '{这不是 JSON'), badJson)
+  check('按下开始冒险：body 不是 JSON 回 400', badJson.code === 400, String(badJson.code))
+  const noAt = fakeRes()
+  await seen.registered.handler(reqOf('POST', '/dsh-gameflow/start', JSON.stringify({})), noAt)
+  check('按下开始冒险：没有 at 回 400（不拿宿主的钟瞎猜）', noAt.code === 400, String(noAt.code))
+  const outsideStart = fakeRes()
+  await seen.registered.handler(reqOf('POST', '/dsh-gameflow/start', JSON.stringify({ at: startAt }), '10.1.2.3'), outsideStart)
+  check('按下开始冒险：非本机来源回 403', outsideStart.code === 403, String(outsideStart.code))
 }
 
 // 深夜 + 改文件最多的一次
@@ -3476,7 +3662,8 @@ check('没用工具但说了话 → 「聊了聊」', chatTags.includes('聊了�
 check('五分钟以内 → 「一小会儿」',
   classify({ startedAt: at(0, 14, 0), minutes: 4, toolCalls: { read: 1 } }).includes('一小会儿'))
 
-// 记录器：从 header.createdAt 起算，到最后一个事件的 time 收尾
+// 记录器：从**第一件事**起算（header.createdAt 只代表「会话开过」，不代表坐下来了——
+// 见 src/index.js 里 event() 的那一段），到最后一个事件的 time 收尾
 let fake = 1000
 const rec = createRecorder({ now: () => fake })
 const session = { id: 's1', header: { createdAt: 1_000_000, cwd: 'D:\\文档合集\\插件\\dsh-gameflow' } }
@@ -5419,7 +5606,7 @@ check('当日计划：册子上的路线是十一站，走得最远的那一处�
   PACK_JOURNEY.stations.length === 11
     && planStone.station.id === 'stone' && planTree.station.id === 'tree'
     && planBell.station.id === 'bell' && planHalf.station.id === 'half',
-  `${PACK_JOURNEY.stations.length} 站 · 没出门 ${planStone.station.id}(${planStone.index + 1}) · 书库 ${planTree.station.id}(${planTree.index + 1}) · 集市 ${planBell.station.id}(${planBell.index + 1}) · 书斋 ${planHalf.station.id}(${planHalf.index + 1})`)
+  `${PACK_JOURNEY.stations.length} 站 · 没出门 ${planStone.station.id}(${planStone.index + 1}) · 书库 ${planTree.station.id}(${planTree.index + 1}) · 货栈 ${planBell.station.id}(${planBell.index + 1}) · 书斋 ${planHalf.station.id}(${planHalf.index + 1})`)
 
 check('当日计划：走到哪一站，身上少的那一分就说到哪一段',
   planStone.loss === 'early' && planTree.loss === 'early' && planBell.loss === 'mid' && planHalf.loss === 'late',
@@ -6075,9 +6262,11 @@ check('今天第一格落盘之后，按钮与那两条说明一起退场',
   && liveHost.all('gf-row').length >= 1,
   `${liveHost.all('gf-start').length} 颗 / 说明 ${liveHost.all('gf-hint').length} 条 / ${liveHost.all('gf-row').length} 行`)
 
-// 今天已经落过活了、但今天还没按过：照样摆那一颗（用户 m19006 逐字：「今天我打开，
-// 并没有让我点击开始冒险呢，直接就是一个，命运选择？」——傍晚才打开面板的人，今天那几格
-// 早就在了，从前这颗按钮只长在空态那一支上，他永远看不见）。
+// 今天已经落过活了、但今天还没按过：照样摆那一颗，**而且一格都不铺**（用户 m19006 逐字：
+// 「今天我打开，并没有让我点击开始冒险呢，直接就是一个，命运选择？」；用户 m19218 逐字：
+// 「你看今天我并没有点开始冒险，却有如此显示」——傍晚才打开面板的人，今天那几格早就在了，
+// 从前这颗按钮只长在空态那一支上，他永远看不见；后来补上了按钮，行却还照旧铺着，于是
+// 这一天「还没开场」却已经讲了一半）。
 const lateStub = (() => {
   const map = new Map([[START_KEY, String(dayZero(NOW) - 86400000)]])
   return {
@@ -6089,32 +6278,34 @@ const lateStub = (() => {
 const lateGf = createGameflow({ loadRecords: () => START_LIVE, now: () => NOW, storage: lateStub })
 lateGf.mount()
 const lateHost = hostNow()
-check('今天已经有落了活、但还没按过：照样摆那一颗「开始冒险」（用户 m19006）',
+check('今天已经有落了活、但还没按过：只摆那一颗「开始冒险」，一格都不铺（用户 m19006 / m19218）',
   lateHost.all('gf-start').length === 1 && lateHost.all('gf-hint').length === 0
-  && lateHost.all('gf-row').length >= 1,
+  && lateHost.all('gf-row').length === 0,
   `${lateHost.all('gf-start').length} 颗 / 说明 ${lateHost.all('gf-hint').length} 条 / ${lateHost.all('gf-row').length} 行`)
 lateHost.all('gf-start')[0].dispatch('click')
 await lateGf.refresh()
-check('按下之后它自己退场，那两条说明不补（今天已经落过活了）',
-  lateHost.all('gf-start').length === 0 && lateHost.all('gf-hint').length === 0,
-  `${lateHost.all('gf-start').length} 颗 / 说明 ${lateHost.all('gf-hint').length} 条`)
+check('按下之后：那一天从第一格讲起，按钮自己退场、那两条说明不补',
+  lateHost.all('gf-start').length === 0 && lateHost.all('gf-hint').length === 0
+  && lateHost.all('gf-row').length >= 1,
+  `${lateHost.all('gf-start').length} 颗 / 说明 ${lateHost.all('gf-hint').length} 条 / ${lateHost.all('gf-row').length} 行`)
 
-// 这一天还没开始讲，命运就先不摆（用户 m19006 第 2 问：「上面是开始冒险的点击，下面又是命运…」）。
-// 行本身照旧铺（左栏是你的日常，见用户 m18735），不铺的是**那件命运**。
+// 这一天还没开始讲，命运就先不摆（用户 m19006 第 2 问：「上面是开始冒险的点击，下面又是命运…」）；
+// 整条见闻录也不铺（用户 m19218）。
 const curtainStore = freshStore()
 curtainStore.removeItem('dsh.gameflow.started')
 const curtainGf = createGameflow({ loadRecords: () => PICK_DAYS, now: () => NOW, storage: curtainStore })
 curtainGf.mount()
 const curtainHost = hostNow()
-check('幕布：没按过「开始冒险」之前，那件命运一颗按钮都不摆（门上那枚记号同时不亮）',
-  curtainHost.all('gf-row').length >= 1 && curtainHost.all('gf-choice-live').length === 0
+check('幕布：没按过「开始冒险」之前一格都不铺，那件命运也没按钮（门上那枚记号同时不亮）',
+  curtainHost.all('gf-row').length === 0 && curtainHost.all('gf-choice-live').length === 0
   && curtainHost.all('gf-door-badge')[0].hidden === true,
   `${curtainHost.all('gf-row').length} 行 / ${curtainHost.all('gf-choice-live').length} 处选项 / 记号${curtainHost.all('gf-door-badge')[0].hidden ? '灭' : '亮'}`)
 curtainHost.all('gf-start')[0].dispatch('click')
 await curtainGf.refresh()
-check('按下「开始冒险」之后：那件命运才摆出来（两颗按钮）',
-  curtainHost.all('gf-choice-live').length === 1 && curtainHost.all('gf-choice-pick').length === 2,
-  `${curtainHost.all('gf-choice-live').length} 处选项 / ${curtainHost.all('gf-choice-pick').length} 颗`)
+check('按下「开始冒险」之后：行铺出来了，那件命运才摆出来（两颗按钮）',
+  curtainHost.all('gf-row').length >= 1 && curtainHost.all('gf-choice-live').length === 1
+  && curtainHost.all('gf-choice-pick').length === 2,
+  `${curtainHost.all('gf-row').length} 行 / ${curtainHost.all('gf-choice-live').length} 处选项 / ${curtainHost.all('gf-choice-pick').length} 颗`)
 
 // 昨天按过不算（用户 m13333 第 2 条「每天出现」）。
 const ydayStub = {
@@ -6138,6 +6329,710 @@ await memGf.refresh()
 check('没有存储也按得动：按过之后当天不再回来（记在内存里）',
   memHost.all('gf-start').length === 0 && memHost.all('gf-hint').length === 2,
   `${memHost.all('gf-start').length} 颗 / 说明 ${memHost.all('gf-hint').length} 条`)
+
+/* ---- 报告 B-05~B-09 的回马枪：每一处都拿一份「最坏的输入」再走一遍 ---- */
+
+// B-06：老记录没有格子，抬头写「起点 – 终点」。跨过午夜那一张从前写成
+// 「昨天 23:30 – 00:10」——读起来像倒着走了二十分钟。终点不是同一天就得写清是哪天。
+const MIDNIGHT_DAYS = [{
+  id: 'midnight', startedAt: at(1, 23, 30), endedAt: at(0, 0, 10), minutes: 40,
+  tags: ['改文件'], counts: { 改文件: 5 }, files: ['D:\\x\\a\\跨午夜.js'],
+}]
+const midnightGf = createGameflow({ loadRecords: () => MIDNIGHT_DAYS, now: () => NOW, storage: freshStore() })
+midnightGf.mount()
+const midnightHost = hostNow()
+const midnightWhen = midnightHost.all('gf-when').map((e) => e.textContent).join(' | ')
+check('跨午夜的抬头写清终点是哪一天（不许出现「昨天 23:30 – 00:10」那种倒着走）',
+  /23:30/.test(midnightWhen) && /今天 00:10/.test(midnightWhen),
+  midnightWhen)
+midnightGf.destroy()
+
+// B-07：`files` 写成一个**字符串**时不能被 spread 成一个个单字（「a · . 等 5 个」）。
+const STRING_FILES = [{
+  id: 'string-files', startedAt: at(0, 16, 0), endedAt: at(0, 16, 20), minutes: 20,
+  tags: ['改文件'], counts: { 改文件: 2 }, files: 'D:\\x\\a\\a.js',
+}]
+const stringGf = createGameflow({ loadRecords: () => STRING_FILES, now: () => NOW, storage: freshStore() })
+stringGf.mount()
+const stringHost = hostNow()
+const stringFiles = stringHost.all('gf-files')[0]
+check('files 是字符串时整条当成一个文件名（不拆成单字）',
+  stringFiles?.textContent.trim() === 'a' && stringFiles?.getAttribute('title') === 'a.js',
+  `「${stringFiles?.textContent}」/ title=${stringFiles?.getAttribute('title')}`)
+stringGf.destroy()
+
+// B-09：接缝（`seam`）只用来问「上一段」，**不是记录**。宿主的 pruneStore 保证它落在昨天以前，
+// 可存档是别人写的、老版本也写过。万一它落在今天，只按时刻过滤就会把它铺成一行
+// 「15:00 – 15:00 · 不到一分钟」，还跟着重算一次命运。
+const SEAM_TODAY = {
+  since: at(30, 0, 0),
+  seam: { startedAt: at(0, 15, 0), endedAt: at(0, 15, 0) },
+  records: [{
+    id: 'seam-today-rec', startedAt: at(0, 16, 0), endedAt: at(0, 16, 25), minutes: 25,
+    tags: ['改文件'], counts: { 改文件: 3 }, files: ['D:\\x\\a\\今天.js'],
+  }],
+}
+const seamGf = createGameflow({ loadRecords: () => SEAM_TODAY, now: () => NOW, storage: freshStore() })
+seamGf.mount()
+const seamHost = hostNow()
+const seamWhens = seamHost.all('gf-when').map((e) => e.textContent).join(' | ')
+check('接缝落在今天也不铺成一行（它只用来问「上一段」）',
+  seamHost.all('gf-row').length === 1 && !/15:00/.test(seamWhens),
+  `${seamHost.all('gf-row').length} 行：${seamWhens}`)
+seamGf.destroy()
+
+// B-08：宿主抖一下（要不到数据）不该把见闻录擦成「他还没走过多远。」——保留上一份。
+const LIVE_ONE = [{
+  id: 'keep-last', startedAt: at(0, 16, 0), endedAt: at(0, 16, 25), minutes: 25,
+  tags: ['改文件'], counts: { 改文件: 3 }, files: ['D:\\x\\a\\在位.js'],
+}]
+let keepLastLoad = () => LIVE_ONE
+const keepLastGf = createGameflow({ loadRecords: () => keepLastLoad(), now: () => NOW, storage: freshStore() })
+keepLastGf.mount()
+const keepLastHost = hostNow()
+const rowsBefore = keepLastHost.all('gf-row').length
+keepLastLoad = () => null // 要不到（fetchStore 那条路交回的就是 null）
+await keepLastGf.refresh()
+check('要不到数据时保留上一份（不闪成空态）',
+  keepLastHost.all('gf-row').length === rowsBefore && keepLastHost.all('gf-empty').length === 0,
+  `${rowsBefore} → ${keepLastHost.all('gf-row').length} 行 / 空态 ${keepLastHost.all('gf-empty').length} 处`)
+keepLastGf.destroy()
+
+// `fetchStore` 与 `fetchRecords` 的两种「没有」要分开：界面那条路要 null（留着上一份），
+// 老写法照旧摊平成空数组（它的契约一直是「只认数组」）。
+stubFetch(async () => { throw new Error('断网') })
+const brokenStore = await fetchStore()
+const brokenRecords = await fetchRecords()
+check('要整份存档：要不到就交回 null（界面留着上一份），老写法照旧交空数组',
+  brokenStore === null && Array.isArray(brokenRecords) && brokenRecords.length === 0,
+  `${brokenStore === null ? 'null' : JSON.stringify(brokenStore)} / ${JSON.stringify(brokenRecords)}`)
+
+// ---------------------------------------------------------------------------
+// 8 → 9：按下「开始冒险」那一刻才是这一天的起点（用户 m04200 逐字「不是，我刚刚点开，
+// 就已经存在2条冒险在里面了，这是不对的。当用户点开的时候，才会开始计算时间，
+// 并到下一个5分钟的时候才会落盘。」）。
+// 下面三组夹具就是照这句话摆的：起点之前的两条一概不铺；按下之后的第一个格子在
+// 下一个整五分钟；没按过的那一天跟从前一样只有那颗按钮。
+// ---------------------------------------------------------------------------
+const PRESSED_AT = at(0, 20, 7)
+const BANNED_REC = (id, from, to, minutes) => ({
+  id, startedAt: from, endedAt: to, minutes, actions: 1,
+  tags: ['改文件'], counts: { 改文件: 1 }, files: ['D:\\x\\a\\a.js'],
+  ticks: [{ at: from, actions: 1, counts: { 改文件: 1 }, files: ['D:\\x\\a\\a.js'], fails: 0, tags: ['改文件'] }],
+})
+const START_STORE = (dayStart, records) => ({ since: at(3, 0, 0), seam: null, dayStart, records })
+
+// ① 今天 20:00、20:05 两条 + 起点 20:07：一条都不铺（那两条都是按下之前就结束的）。
+// 本地那枚「今天按过」的标记这里故意空着（按下那一刻宿主那条路由还没回来），
+// 所以画面上该是**只有那颗按钮**——起点只由 dayStart 说了算。
+const beforeStartStorage = freshStore()
+beforeStartStorage.removeItem('dsh.gameflow.started')
+const beforeStartGf = createGameflow({
+  loadRecords: () => START_STORE(PRESSED_AT, [
+    BANNED_REC('b-1', at(0, 19, 55), at(0, 20, 0), 5),
+    BANNED_REC('b-2', at(0, 20, 0), at(0, 20, 5), 5),
+  ]),
+  now: () => at(0, 20, 9),
+  storage: beforeStartStorage,
+})
+beforeStartGf.mount()
+const beforeStartHost = hostNow()
+check('按下之前攒的那几条一概不铺（起点之前就结束的记录一条都不算）',
+  beforeStartHost.all('gf-row').length === 0 && beforeStartHost.all('gf-start').length === 1,
+  `${beforeStartHost.all('gf-row').length} 行 / 按钮 ${beforeStartHost.all('gf-start').length} 个`)
+beforeStartGf.destroy()
+
+// ② 起点 20:07，20:09 有一次工具调用：20:10 之前仍是空，跨过 20:10 才出现「今天 20:10」那一格。
+const firstCellStore = START_STORE(PRESSED_AT, [
+  BANNED_REC('c-1', at(0, 20, 9), at(0, 20, 9), 1),
+])
+let firstCellNow = at(0, 20, 9)
+const firstCellGf = createGameflow({
+  loadRecords: () => firstCellStore,
+  now: () => firstCellNow,
+  storage: freshStore(),
+})
+firstCellGf.mount()
+const firstCellHost = hostNow()
+check('按下之后、整五分钟还没到：见闻录仍是空的（第一行不落在按下那一刻）',
+  firstCellHost.all('gf-row').length === 0, `${firstCellHost.all('gf-row').length} 行`)
+firstCellNow = at(0, 20, 11)
+await firstCellGf.refresh()
+const firstCellWhens = firstCellHost.all('gf-when').map((e) => e.textContent).join(' | ')
+check('跨过下一个整五分钟才落第一格，且写的是那一格（今天 20:10）',
+  firstCellHost.all('gf-row').length === 1 && /20:10/.test(firstCellWhens) && !/20:09/.test(firstCellWhens),
+  `${firstCellHost.all('gf-row').length} 行：${firstCellWhens}`)
+firstCellGf.destroy()
+
+// ③ 没按过的那一天：跟从前一模一样——只有那颗按钮，一格都不铺。
+const neverStarted = freshStore()
+neverStarted.removeItem('dsh.gameflow.started')
+const neverStartGf = createGameflow({
+  loadRecords: () => START_STORE(0, [BANNED_REC('d-1', at(0, 16, 0), at(0, 16, 25), 25)]),
+  now: () => NOW,
+  storage: neverStarted,
+})
+neverStartGf.mount()
+const neverStartHost = hostNow()
+check('没按过「开始冒险」的一天：只有那颗按钮，一格都不铺',
+  neverStartHost.all('gf-row').length === 0 && neverStartHost.all('gf-start').length === 1
+    && neverStartHost.all('gf-list-before-start').length === 1,
+  `${neverStartHost.all('gf-row').length} 行 / 按钮 ${neverStartHost.all('gf-start').length} 个`)
+neverStartGf.destroy()
+
+// ④ 升级那一天：本地那枚标记是**今天**（老版本按过、记下的），可存档是 8 时代的样子——
+// 有 `version`、没有 `dayStart`。这时不能认旧账，否则他打开就又看见按下之前那几行
+// （用户 m04200 报的就是这个：刚点开就已经有两条冒险在里面了）。
+const upgradeStore = freshStore() // 默认就写着「今天已经按过」
+const upgradeGf = createGameflow({
+  loadRecords: () => ({
+    version: STORE_VERSION,
+    since: at(3, 0, 0),
+    seam: null,
+    records: [BANNED_REC('u-1', at(0, 19, 55), at(0, 20, 0), 5)],
+  }),
+  now: () => NOW,
+  storage: upgradeStore,
+})
+upgradeGf.mount()
+const upgradeHost = hostNow()
+check('升级那天：存档里没有 dayStart 就不认本地那枚旧标记（仍然只有按钮、一格不铺）',
+  upgradeHost.all('gf-row').length === 0 && upgradeHost.all('gf-start').length === 1
+    && upgradeHost.all('gf-list-before-start').length === 1,
+  `${upgradeHost.all('gf-row').length} 行 / 按钮 ${upgradeHost.all('gf-start').length} 个`)
+upgradeGf.destroy()
+
+/* 地方图的机器自查（2026-10-27，地图审计 M-2）：20 扇窗逐个跑 `src/map/local.js` 的
+   `check(focus)`——镇子在陆上 / 取景框不出世界 / 城在框里 / 夜罩最后一条 / 窗里每座城
+   都有自己的名字牌。原来这条只活在 `.scratch/wire.mjs` 之外的临时脚本里，20 扇里有
+   15 扇丢名字（29 个，连焦点城也丢），没人发现。 */
+for (const [city] of LOCAL_FOCUS) {
+  const [bad, len] = localCheck(city)
+  check(`地方图 ${city}：镇子在陆上、框不出世界、夜罩收尾、城名都写出来了`,
+    bad.length === 0, bad.length ? bad.join(' / ') : `${len} 字节`)
+}
+
+/* 世界图的机器自查（2026-10-30，地图审计 M-4/M-5/M-9/M-13/M-14/M-15）。
+   六条：① 面板那枚地名签的框跟世界图那块牌子用的是同一条算式（`plate_rect`）；
+   ② 十三枚签和图上已有的字与记号几乎不压（压的按面积算，≤3 枚）；
+   ③ 六处野地各有记号；④ 四块陆地各有底色；⑤ 一级国名不小于 1.22；⑥ 都城落在数据坐标上。 */
+const mapWorld = await import('../src/map/world.js')
+if (HAVE_MAP_FIXTURE) {
+  const { places: MAP_PLACES } = await import('../src/packs/adventure/world.js')
+  const { view: MAP_VIEW } = await import('../src/packs/adventure/world.js')
+  const { NATIONS: MAP_NATIONS } = await import('../src/map/world3.js')
+  const view = MAP_VIEW || { x: 0, y: 0, w: 66, h: 34 }
+
+  // ① 同一条算式：`plate_rect` 与面板那块碑 bg 的宽高一致，基线也对得上。
+  const probe = mapWorld.placeLabel(0, 0, '银树城', mapWorld.PLACE_FS, { x: -100, y: -100, w: 400, h: 400 })
+  const wantW = probe[2] - probe[0]
+  const wantH = probe[3] - probe[1]
+  const panel = hostNow()
+  const bgEl = panel && panel.querySelector('.gf-place-bg')
+  const txEl = panel && panel.querySelector('.gf-place-text')
+  const gotFs = txEl ? Number(txEl.getAttribute('font-size')) : 0
+  const wantAt = mapWorld.placeLabel(0, 0, txEl ? txEl.textContent : '', gotFs, { x: -100, y: -100, w: 400, h: 400 })
+  check('面板那枚地名签跟世界图那块牌子用同一条算式（M-14）',
+    Boolean(bgEl) && Math.abs(Number(bgEl.getAttribute('width')) - (wantAt[2] - wantAt[0])) <= 0.12
+    && Math.abs(Number(bgEl.getAttribute('height')) - (wantAt[3] - wantAt[1])) <= 0.12
+    && Math.abs(Number(txEl.getAttribute('y')) - (Number(bgEl.getAttribute('y')) + gotFs * 1.37)) <= 0.06,
+    bgEl && `${txEl.textContent} ${bgEl.getAttribute('width')}×${bgEl.getAttribute('height')} fs=${gotFs} 期望 ${wantAt[2] - wantAt[0]}×${wantAt[3] - wantAt[1]}（样签 ${wantW}×${wantH}）`)
+
+  // ② 十三枚签压在图上字/记号上的枚数（M-4：改前 10 枚，改后 2 枚；t24 不许变多）。
+  let pressed = 0
+  const pressedNames = []
+  for (const key of Object.keys(MAP_PLACES)) {
+    const one = MAP_PLACES[key]
+    const rect = mapWorld.placeLabel(one.door[0], one.door[1], one.name.adventure, mapWorld.PLACE_FS, view)
+    let hit = false
+    for (const b of mapWorld.textBoxes()) {
+      const ox = Math.min(rect[2], b[4]) - Math.max(rect[0], b[2])
+      const oy = Math.min(rect[3], b[5]) - Math.max(rect[1], b[3])
+      if (ox > 0.05 && oy > 0.05) hit = true
+    }
+    if (hit) {
+      pressed++
+      pressedNames.push(one.name.adventure)
+    }
+  }
+  check('十三枚地名签几乎不压图上已有的字与记号（M-4：≤2，t24 不许变多）', pressed <= 2,
+    `${pressed}/13${pressedNames.length ? '：' + pressedNames.join(' ') : ''}`)
+
+  // ③ 六处野地都有记号（M-5：改前只有「奇观」八处，野地一枚也没有）。
+  const wildKeys = ['ruin', 'frost', 'mine', 'quench', 'tower', 'watch']
+  const svgNow = MAP_SVG || ''
+  const wildHits = wildKeys.filter((k) => svgNow.includes(`gf-wild-${k}`))
+  check('六处野地各自有记号（M-5）', wildHits.length === wildKeys.length, `${wildHits.length}/6`)
+
+  // ④ 四块陆地各有底色（M-9：改前四块共用一张 `grasstex`）。
+  const landHits = ['west', 'north', 'east', 'isles'].filter((k) => svgNow.includes(`url(#grasstex-${k})`))
+  check('四块陆地名下的底色各不相同（M-9）', landHits.length === 4, `${landHits.length}/4`)
+
+  // ⑤ 国名的字号（2026-10-31 t24 抬到 1.06，t30 抬到 1.11）。
+  //
+  //    **这一段只证「源码常数」，不证几何。** 分工写在最前面，别再往这里塞几何断言：
+  //    - **几何归 `scripts/look.mjs`**：它在真无头 Edge 里用 `getBoundingClientRect`
+  //      量「面板宽 − 44 = 地图本体宽」「每单位多少 px」「二级国名等效字号 ≥ 8.5px」
+  //      「一级 ≥ 9px」，四个尺寸各量一次。真几何一变，那里会红。
+  //    - **smoke 是手搓的 DOM 垫片，没有排版能力**：`getBoundingClientRect` 可能压根没有，
+  //      `clientWidth` 给的是 350 这种假数。所以这里**不再「试着量一下、量不到退回常量」**——
+  //      那种写法看着在量事实，实际在比常数（t31 复核点名的就是它）。
+  //
+  // 这里能证的只有两件真事：① 源码里的 `NATION_FS` 与期望一致（改回旧值就红）；
+  // ② 拿 look.mjs 四尺寸实测的地图本体宽当分母，等效字号够 8.5 / 9。
+  const MAP_WIDTH_PX = 508 // look.mjs 四个尺寸实测（面板 560 − 左右各 22px padding = 508）
+  const FRAME_W = 66
+  // 字号从 `src/map/world.js` 的源码里读（`NATION_FS` 是模块私有常量，不为了自检改成导出）。
+  const worldSrc = readFileSync(new URL('../src/map/world.js', import.meta.url), 'utf8')
+  const fsPair = /const NATION_FS = \{ 1: ([\d.]+), 2: ([\d.]+) \}/.exec(worldSrc)
+  const fs1 = fsPair ? Number(fsPair[1]) : NaN
+  const fs2 = fsPair ? Number(fsPair[2]) : NaN
+  check('源码里的国名字号是 一级 1.22 / 二级 1.11（smoke 只证常数，几何归 look.mjs）',
+    fs1 === 1.22 && fs2 === 1.11, `读到 ${fsPair ? `${fsPair[1]} / ${fsPair[2]}` : 'NATION_FS 没解析出来'}`)
+  const t1px = (fs1 * MAP_WIDTH_PX) / FRAME_W
+  const t2px = (fs2 * MAP_WIDTH_PX) / FRAME_W
+  const szTag = (fs) => fs.toFixed(2)
+  const nationSizes = [...svgNow.matchAll(/font-size="(1\.\d\d|0\.\d\d)"/g)].map((m) => m[1])
+  const t1Count = nationSizes.filter((v) => v === szTag(fs1)).length
+  const t2Count = nationSizes.filter((v) => v === szTag(fs2)).length
+  check(`国名放大了：一级 ${szTag(fs1)}、二级 ${szTag(fs2)}（M-13 / t24 / t30）`,
+    t1Count >= 11 && t2Count >= 8 && nationSizes.filter((v) => v === '0.92').length === 0,
+    `${szTag(fs1)} × ${t1Count} / ${szTag(fs2)} × ${t2Count} / 0.92 × ${nationSizes.filter((v) => v === '0.92').length}`)
+
+  // ⑤之二 等效字号（**算式层面**）：字号 × 地图本体宽 / 取景框宽 ≥ 8.5px。
+  // 分母 508 抄自 look.mjs 四尺寸实测；**真几何对不对由 look.mjs 断言，这里不量**。
+  check(`二级国名等效字号 ≥ 8.5px（${szTag(fs2)} × ${MAP_WIDTH_PX} / ${FRAME_W} = ${t2px.toFixed(2)}px，t30）`,
+    t2px >= 8.5, `${t2px.toFixed(2)}px（分母用 look.mjs 实测常量 ${MAP_WIDTH_PX}px；几何本身归 look.mjs）`)
+  check(`一级国名等效字号 ≥ 9px（${szTag(fs1)} × ${MAP_WIDTH_PX} / ${FRAME_W} = ${t1px.toFixed(2)}px，t30）`,
+    t1px >= 9, `${t1px.toFixed(2)}px`)
+  check('图上那些国名牌用的就是这两个字号（baked SVG 与 NATION_FS 不许脱节，t30）',
+    svgNow.includes(`font-size="${szTag(fs1)}"`) && svgNow.includes(`font-size="${szTag(fs2)}"`),
+    `找 ${szTag(fs1)} / ${szTag(fs2)}`)
+  check('二级国名没有被抽稀掉（相压为 0 时九块都画得出来，t24）',
+    mapWorld.nationSkips().length === 0 && t2Count === 9,
+    `抽掉 ${mapWorld.nationSkips().length} 块${mapWorld.nationSkips().length ? '：' + mapWorld.nationSkips().map((s) => s[0]).join(' ') : ''}`)
+
+  // ⑤之三 图上没有任何两块牌/记号互相压住（t24：从前自述 3 处、实为 3 处，现在必须 0）。
+  const collideCount = (() => {
+    const log = console.log
+    const lines = []
+    console.log = (...a) => lines.push(a.join(' '))
+    mapWorld.check()
+    console.log = log
+    return lines.filter((l) => l.startsWith('！压住')).length
+  })()
+  check('图上没有两块牌子/记号压在一起（世界自查 check() 为 0，t24）', collideCount === 0, `相压 ${collideCount} 处`)
+
+  // ⑥ 都城记号就画在数据给的坐标上（M-15：改前一律是「国名落点 + 固定偏移」）。
+  const offs = MAP_NATIONS.map((row) => {
+    const [cname, cx, cy] = row[6]
+    const [kx, ky] = mapWorld._cap_at(cname, row[5][0], row[5][1], row[6][3], cx, cy)
+    return Math.max(Math.abs(kx - cx), Math.abs(ky - cy))
+  })
+  check('二十座都城都画在数据坐标上（M-15）', offs.every((d) => d < 0.01),
+    `最大偏差 ${Math.max(...offs).toFixed(2)} 格`)
+}
+
+/* --- 门框上那枚惊叹号：亮 = 有一处命运正等你决定，且见闻录为此停住 -------------
+ * 用户 m04298 第 2 条原话：「还是有之前的那个问题：即门上有感叹号，但是查看的时候却没有选择；
+ * 或者是有感叹号，但是已经跑过了选择的落盘。正确的是，当有感叹号的时候，意味着有一个命运选择的
+ * 时候需要用户来做出，界面会一直停在这个地方等待用户做出选择，否则不会有新的落盘。」
+ *
+ * 唯一标准：**记号亮着 ⇔ 屏幕上真摆着一对可点的选项**。从前记号有两个来源——门收着时
+ * `refreshBadge` 自己算一遍、门开着时读 `renderTimeline` 的 `pending`；两处闸门不一样
+ * （收着那一支不认幕布、不重读挑过的账），于是出现「门上有感叹号，推开门却没有选项」
+ * 与「有感叹号，可那一挑早跑完了」。现在 `refreshBadge` 也照见闻录那台机器真画一遍、
+ * 读同一个数，下面四条就是钉住这件事的。
+ * ------------------------------------------------------------------ */
+{
+  const hostNow = () => [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+  const badgeOn = (host) => {
+    const one = host.all('gf-door-badge')[0]
+    return !!one && one.hidden === false
+  }
+  const liveCount = (host) => host.all('gf-choice-live').length
+  // 一份会摆出岔口的今天：凌晨撞过墙那一段（fails 4）+ 刚落定的那一格。
+  const forkDays = () => MISS_DAYS.map((one) => ({ ...one }))
+  // 跨午夜那张卡：昨天 23:50 坐下、今天 00:10 才收笔（用户 m04298 说的那两种情形都要撞一遍）。
+  const crossDays = () => ([
+    ...forkDays(),
+    {
+      id: 't14-cross', startedAt: at(1, 23, 50), endedAt: at(0, 0, 10), minutes: 10,
+      tags: ['改文件'], counts: { 改文件: 2 }, fails: 0,
+      ticks: [foldTick(1, 23, 55, 1), foldTick(0, 0, 5, 1)],
+    },
+  ])
+
+  // ① 按下「开始冒险」之前就有记录的那一份：存档是从老版本升上来的（带 `version`、没有
+  //    `dayStart`），本地还留着 8 时代那枚「今天按过」的旧标记。见闻录这时候是幕布，
+  //    屏幕上一对按钮都没有——门上的记号也就不该亮（这条在旧代码上是红的）。
+  const staleGf = createGameflow({
+    loadRecords: () => ({ version: STORE_VERSION, since: at(3, 0, 0), seam: null, records: forkDays() }),
+    now: () => NOW,
+    storage: freshStore(),
+  })
+  staleGf.mount()
+  await tick()
+  const staleHost = hostNow()
+  await staleGf.refreshBadge()
+  const staleClosed = badgeOn(staleHost)
+  staleGf.open()
+  await tick()
+  await staleGf.refresh()
+  const staleOpen = badgeOn(staleHost)
+  const staleLive = liveCount(staleHost)
+  check('记号与选项同生同死（一）：按下「开始冒险」之前那份存档——门收着不亮，推开门也没有选项',
+    staleClosed === false && staleOpen === false && staleLive === 0,
+    `收着 亮=${staleClosed}，开着 亮=${staleOpen} / 选项=${staleLive}`)
+  staleGf.destroy()
+
+  // ② 同一份记录、两条路：门收着算出来的数必须等于推开门屏幕上真摆着的那一对。
+  let sameNow = NOW
+  const sameGf = createGameflow({
+    loadRecords: () => crossDays(),
+    now: () => sameNow,
+    storage: freshStore(),
+  })
+  sameGf.mount()
+  await tick()
+  const sameHost = hostNow()
+  await sameGf.refreshBadge()
+  const sameClosed = badgeOn(sameHost)
+  sameGf.open()
+  await tick()
+  await sameGf.refresh()
+  const sameOpen = badgeOn(sameHost)
+  const sameLive = liveCount(sameHost)
+  check('记号与选项同生同死（二）：同一份记录，门收着与门开着得出同一个数（亮 ⇔ 有选项）',
+    sameClosed === sameOpen && sameOpen === (sameLive > 0) && sameLive >= 1,
+    `收着 亮=${sameClosed}，开着 亮=${sameOpen} / 选项=${sameLive}`)
+
+  // ③ 停住：钟往前推三个整五分钟，一行都不许新增，那一对选项还在原位
+  //    （用户 m14810 第 5 条：「界面就停在这个地方等用户来选择」）。
+  const rowsBefore = sameHost.all('gf-row').length
+  const rowAt = () => sameHost.all('gf-row').findIndex((r) => r.all('gf-choice-live').length === 1)
+  const liveRowBefore = rowAt()
+  sameNow = NOW + 15 * 60 * 1000
+  await sameGf.refresh()
+  const rowsAfter = sameHost.all('gf-row').length
+  const liveRowAfter = rowAt()
+  check('摆着选项时把钟往前推三个整五分钟：一行都不新增，那一对选项还在原位',
+    rowsAfter === rowsBefore && liveCount(sameHost) >= 1 && liveRowAfter === liveRowBefore,
+    `${rowsBefore} → ${rowsAfter} 行 / 选项在第 ${liveRowBefore + 1} → ${liveRowAfter + 1} 行`)
+
+  // ④ 挑完：记号立刻灭，再刷新两次也不会自己亮回来；那一截立刻照原样铺开。
+  sameHost.all('gf-choice-live')[0].all('gf-choice-pick')[0].dispatch('click')
+  await tick()
+  await sameGf.refresh()
+  const afterPickLive = liveCount(sameHost)
+  const badgeRightAfter = badgeOn(sameHost)
+  const doneSegments = sameHost.all('gf-choice-done').length
+  const forkLines = sameHost.all('gf-fork-line').length
+  await sameGf.refresh()
+  await sameGf.refresh()
+  const badgeLater = badgeOn(sameHost)
+  check('挑完之后记号立刻灭，再刷新两次也不会自己亮回来（记号亮 = 真的还有一处没挑）',
+    afterPickLive === 0 && badgeRightAfter === false && badgeLater === false,
+    `选项=${afterPickLive} / 立刻 亮=${badgeRightAfter} / 两次之后 亮=${badgeLater}`)
+  check('挑完之后那一截立刻照原样铺开（不再停住）',
+    doneSegments === 1 && forkLines >= 2 && sameHost.all('gf-row').length >= rowsBefore,
+    `${doneSegments} 段走完的 / ${forkLines} 句命运 / ${sameHost.all('gf-row').length} 行`)
+  sameGf.destroy()
+}
+
+
+// 红线 14 的禁词表真有牙（2026-10-31，用户 m04298 第 1 条）。
+// 只验「表里非空」是没有意义的——那条断言在表被清空、或者判定被短路时照样绿。
+// 所以这里走 `scripts/packs.mjs --probe`：它是**同一条判定**（scanRedline14），
+// 塞一句带禁词的进去必须报命中，塞一句干净的必须报 0。
+{
+  const probe = (text) => {
+    const run = spawnSync(process.execPath, [fileURLToPath(new URL('./packs.mjs', import.meta.url)), '--probe', text], { encoding: 'utf8' })
+    return { status: run.status, stdout: String(run.stdout || '') }
+  }
+  const bad = probe('他推门进客栈，柜上的掌柜抬起头。')
+  const good = probe('店主擦着碗说，北边来的人这回绕了远路。')
+  check('红线 14 的禁词表真有牙：塞一句「进入客栈、掌柜抬头」进去必须抓到（中式铺面那一路）',
+    bad.status !== 0 && bad.stdout.includes('R23 自检：') && bad.stdout.includes('掌柜') && bad.stdout.includes('客栈')
+    && /R23 自检：([1-9]\d*) 处/.test(bad.stdout),
+    `退出 ${bad.status} / ${bad.stdout.trim().split('\n').slice(-1)[0] || '（没有输出）'}`)
+  check('红线 14 的禁词表不误伤：同一句里换成「店主」就该一声不响',
+    good.status === 0 && good.stdout.includes('R23 自检：0 处'),
+    `退出 ${good.status} / ${good.stdout.trim().split('\n').slice(-1)[0] || '（没有输出）'}`)
+}
+
+// 命运得是真的两难（2026-10-31，用户 m04344 那句「一个救那箱纸、一个救人，那不是就是让人去
+// 救人吗？也就是选择没有意义，因为根本不会两难」）。跟红线 14 一个办法：走 `--probe-forks`
+// 喂一件**故意写坏的** fork（按钮写「别管」、look 只有一句、句子里把代价说了），它必须当场抓到；
+// 同时把仓库里真在用的那三件逐条过一遍——判据的权威版本在 `scripts/packs.mjs` 的
+// `scanForkRoads`，这里只验「产出的数据没回过味来」。
+{
+  const run = spawnSync(process.execPath, [fileURLToPath(new URL('./packs.mjs', import.meta.url)), '--probe-forks'], { encoding: 'utf8' })
+  const stdout = String(run.stdout || '')
+  check('命运的机器判据真有牙：按钮写「别管」、look 只有一句、句子里说「代价」，三样都得抓到',
+    run.status === 0 && /R22 自检：坏样本 ([3-9]|\d\d+) 处 \/ 干净样本 0 处/.test(stdout),
+    `退出 ${run.status} / ${stdout.trim().split('\n').slice(-1)[0] || '（没有输出）'}`)
+
+  const judge = ['别管', '不管', '见死不救', '袖手', '少管闲事', '自扫门前雪', '事不关己']
+  const ledger = ['代价', '风险', '会失去']
+  const { forks } = await import('../src/packs/adventure/forks.js')
+  const roads = (forks || []).flatMap((fork) => (fork.roads || []).map((road) => ({ fork: fork.id, road })))
+  const judged = roads.filter(({ road }) => judge.some((w) => String(road.label || '').includes(w)))
+  const shortLook = roads.filter(({ road }) => !Array.isArray(road.look) || road.look.length < 2)
+  const leaked = roads.filter(({ road }) => (road.look || []).some((t) => ledger.some((w) => String(t).includes(w))))
+  check('命运的按钮都不自带审判（「别管」那一路已经改成只说做什么）',
+    judged.length === 0,
+    judged.map(({ fork, road }) => `${fork}/${road.id}: ${road.label}`).join(' / ') || `${roads.length} 条路都干净`)
+  check('命运的两条路各给两句理由是必须的：少一句就红',
+    shortLook.length === 0,
+    shortLook.map(({ fork, road }) => `${fork}/${road.id}: ${(road.look || []).length} 句`).join(' / ') || '每条路都是两句')
+  check('命运那两句理由里一个字都不许把账摊开（「代价/风险/会失去」）',
+    leaked.length === 0,
+    leaked.map(({ fork, road }) => `${fork}/${road.id}`).join(' / ') || '没有一句提到代价')
+}
+
+/* ------------------------------------------------------------------ *
+ * 册子上的十一站：每一站都得**真能走到**（2026-10-31，t19）
+ *
+ * 2026-10-31 之前有两站挂在同一个地方：`sunken`（灰港 / 沉桥）与 `sea`（珊瑚海国 / 海底）
+ * 都挂 `quench`（河湾）。`stationOf` 是**从最后一站往前**找第一个条件全中的，所以去一趟河湾
+ * 两站同时成立、靠前那一站（灰港）**永远轮不到**——册子上的第六站等于不存在，人还没出海，
+ * 第十站（海底）先亮了。
+ *
+ * 这里四条判据，防的都是「下一次」：
+ *   ① 逐站验可达：按这一站自己的条件造一份最小见证，`stationOf` 必须落回**这一站**；
+ *   ② 珊瑚海国单独立一条（它就是被吃掉的那一站）；
+ *   ③ 两站的条件**不许等价**——等价时靠前那站永远轮不到，这一条比修好某一站更值钱；
+ *   ④ 站名是真地名：世界图上查得到，或者世界包里那七处屋子的名字（`界碑镇` 是他出发的镇子，
+ *      比地图上的城小、世界图上没有它的牌子，来处在 `叙事/世界观.md` 第七、八节——所以是**明写的例外**）。
+ * ------------------------------------------------------------------ */
+{
+  const { stationOf } = await import('../src/packs/rules.js')
+  const { journey: JOURNEY_NOW } = await import('../src/packs/adventure/journey.js')
+  const { places: PLACES_NOW } = await import('../src/packs/adventure/world.js')
+  const world3 = await import('../src/map/world3.js')
+  const STATIONS = JOURNEY_NOW.stations || []
+
+  // 野地那六处「地方」与「景」是同一件事的两面：人到了河湾，`places` 里有 quench，
+  // 那一格挑中的 `sceneKey` 也是 quench（见包里 scenes 的 `place` 字段）。造见证时必须一起加，
+  // 否则会得出「改前灰港到得了」这种假结论。
+  const WILD_NOW = new Set(['ruin', 'frost', 'mine', 'quench', 'tower', 'watch'])
+  const witness = (one) => {
+    const facts = {
+      places: new Set(), scenes: new Set(), hours: new Set(),
+      fails: 0, minutes: 0, helpers: 0, actions: 0, files: 0, deliverables: [],
+    }
+    const put = (key, isPlace) => {
+      if (isPlace) facts.places.add(key)
+      facts.scenes.add(key)
+      if (WILD_NOW.has(key)) facts.places.add(key)
+    }
+    for (const term of one.when || []) {
+      if (term.when === 'places') for (const p of term.has || []) put(p, true)
+      else if (term.when === 'scenes') for (const k of term.has || []) put(k, false)
+      else if (term.when === 'hours') facts.hours.add((term.in || [[0, 1]])[0][0])
+      else if (term.when === 'fails') facts.fails = Math.max(facts.fails, Number(term.gte ?? 1))
+      else if (term.when === 'minutes') facts.minutes = Math.max(facts.minutes, Number(term.gte ?? 1))
+      else if (term.when === 'helpers') facts.helpers = Math.max(facts.helpers, Number(term.gte ?? 1))
+      else if (term.when === 'actions') facts.actions = Math.max(facts.actions, Number(term.gte ?? 1))
+      else if (term.when === 'files') facts.files = Math.max(facts.files, Number(term.gte ?? 1))
+      else if (term.when === 'deliverables') {
+        const need = Math.max(1, Number(term.gte ?? 1))
+        facts.deliverables = Array.from({ length: need }, (_, i) => `w${i}.md`)
+      }
+    }
+    return facts
+  }
+  const dead = STATIONS.filter((one) => (one.when || []).length && stationOf(witness(one), STATIONS) !== one)
+  const bare = STATIONS.filter((one) => !(one.when || []).length)
+  check('当日计划：册子上十一站**每一站都真能走到**（按各站自己的条件造一天，走得最远的那一处正是它）',
+    STATIONS.length === 11 && bare.length === 1 && dead.length === 0,
+    dead.length
+      ? dead.map((one) => `${one.id}(${one.label}) → ${(stationOf(witness(one), STATIONS) || {}).id || '（没有）'}`).join(' / ')
+      : `${STATIONS.length} 站：兜底 ${bare[0] ? bare[0].id : '（没有）'}，其余 ${STATIONS.length - bare.length} 站各自可达`)
+
+  // ② 就是被吃掉的那一站：去一趟河湾，算的是珊瑚海国（第十站）；而灰港（第六站）在自己那一天
+  //   也真出现过——两站从此各归各的，不再互相遮。
+  const seaOne = STATIONS.find((one) => one.id === 'sea') || null
+  const sunkenOne = STATIONS.find((one) => one.id === 'sunken') || null
+  const seaHit = seaOne ? stationOf(witness(seaOne), STATIONS) : null
+  const sunkenHit = sunkenOne ? stationOf(witness(sunkenOne), STATIONS) : null
+  check('当日计划：册子第十站（珊瑚海国）真到得了——去一趟河湾算的是它，第六站（灰港）也不再被盖住',
+    !!seaOne && !!sunkenOne && seaHit === seaOne && sunkenHit === sunkenOne,
+    `${seaOne ? `河湾 → ${seaHit ? `${seaHit.id}(${seaHit.label})` : '（没有）'}` : '（包里没有 sea 那一站）'}`
+    + ` · ${sunkenOne ? `废塔 → ${sunkenHit ? `${sunkenHit.id}(${sunkenHit.label})` : '（没有）'}` : '（包里没有 sunken 那一站）'}`)
+
+  // ③ 两站的条件不许等价、也不许一站的落点被后面那站整个盖住。
+  //    「盖住」比「等价」更宽：`A` 只挂 quench、`B` 挂 quench + tower，那么任何让 `A` 成立的那天
+  //    都让 `B` 成立，而 `stationOf` 先问靠后的 `B` ⇒ `A` 永远轮不到。所以判的是**子集**，不是相等。
+  const forced = (one) => {
+    const keys = new Set()
+    let pure = true
+    for (const term of one.when || []) {
+      if (term.when === 'places' || term.when === 'scenes') {
+        for (const key of term.has || []) keys.add(`${term.when}:${key}`)
+      } else pure = false
+    }
+    return { keys, pure }
+  }
+  const shaded = []
+  for (let i = 0; i < STATIONS.length; i += 1) {
+    const a = forced(STATIONS[i])
+    if (!a.keys.size || !a.pure) continue
+    for (let j = i + 1; j < STATIONS.length; j += 1) {
+      const b = forced(STATIONS[j])
+      if (!b.keys.size || !b.pure) continue
+      if (Array.from(a.keys).every((key) => b.keys.has(key))) shaded.push(`${STATIONS[i].id} ⊂ ${STATIONS[j].id}`)
+    }
+  }
+  check('当日计划：册子上没有哪一站的落点被后面那站整个盖住（盖住＝它永远轮不到，正是河湾那次事故）',
+    shaded.length === 0,
+    shaded.length ? shaded.join(' · ') : `${STATIONS.filter((one) => (one.when || []).length).length} 站的条件两两不包含`)
+
+  // ④ 站名是真地名（世界图 / 世界包 / 明写的例外）。
+  const mapNames = new Set()
+  for (const row of world3.NATIONS || []) {
+    if (!Array.isArray(row)) continue
+    if (typeof row[0] === 'string') mapNames.add(row[0])
+    if (Array.isArray(row[6]) && typeof row[6][0] === 'string') mapNames.add(row[6][0])
+  }
+  for (const row of world3.LABELS || []) if (Array.isArray(row) && typeof row[0] === 'string') mapNames.add(row[0])
+  for (const key of Object.keys(world3.SHORT || {})) mapNames.add(key)
+  const placeNames = new Set()
+  for (const one of Object.values(PLACES_NOW || {})) {
+    for (const voice of Object.keys(one.name || {})) placeNames.add(one.name[voice])
+  }
+  // 他出发的那座镇子：世界图上没有它的牌子（比城小），出处是 `叙事/世界观.md` 第七、八节。
+  const HOME_TOWN = '界碑镇'
+  const empty = STATIONS.filter((one) => one.label !== HOME_TOWN
+    && !mapNames.has(one.label) && !placeNames.has(one.label))
+  check('当日计划：册子上每一站的地名都是这世界里真有的（世界图上查得到，或世界包里那几处屋子的名字）',
+    empty.length === 0 && STATIONS.some((one) => one.label === HOME_TOWN),
+    empty.length ? empty.map((one) => `${one.id}(${one.label})`).join(' / ') : `${STATIONS.length} 站都对得上（${HOME_TOWN} 是他出发的镇子，明写例外）`)
+
+  // 站挂的地点键必须在世界包里（打错一个字母就一直落在第一站，谁也不报错）。
+  const unknownKeys = []
+  for (const one of STATIONS) {
+    for (const term of one.when || []) {
+      if (term.when !== 'places') continue
+      for (const key of term.has || []) if (!PLACES_NOW || !PLACES_NOW[key]) unknownKeys.push(`${one.id}: ${key}`)
+    }
+  }
+  check('当日计划：各站挂的地方都是世界包里真有的那几处（挂错键会永远落在第一站，且一声不响）',
+    unknownKeys.length === 0,
+    unknownKeys.join(' / ') || `${Object.keys(PLACES_NOW || {}).length} 处地方，键都认得出`)
+}
+
+/* ------------------------------------------------------------------ *
+ * 2026-10-31（t28）：挂载时那一次长任务，与滚动取证仪表的三处读数。
+ *
+ * 背景（用户 m16xxx / t27 的 trace）：挂载那一刻 `buildStage()` 就把 554 KB、两千多
+ * 个形状的整张世界图 `innerHTML` 进一棵 `display:none` 的树里，实测那次长任务
+ * 260ms ParseHTML + 340ms EvaluateScript，而面板默认是收着的——绝大多数启动根本
+ * 不会打开它。现在地图分两步：先建壳（类名照样先给），真面板等第一次开门再灌。
+ * ------------------------------------------------------------------ */
+
+// A. 地图可以「只建壳」，等第一次开门再灌（真面板走的就是这一路）。
+{
+  const eager = buildStage()
+  const eagerShapes = eager.svg.all('gf-map')[0].children.length
+  check('地图默认是建的时候就灌好：自检里那十几处直接调 buildStage() 的地方，行为一个字没变',
+    eagerShapes > 1000,
+    `${eagerShapes} 个孩子`)
+
+  const lazy = buildStage({ deferMap: true })
+  const lazyMap = lazy.svg.all('gf-map')[0]
+  const shell = lazyMap.getAttribute('class')
+  const filled = lazy.fillMap()
+  const shapes = lazyMap.children.length
+  const again = lazy.fillMap()
+  const shapesAgain = lazyMap.children.length
+  check('传 deferMap 就只建壳（那一层在、里面空着），fillMap() 只灌一次，第二次返回 false',
+    shell === 'gf-map' && filled === true && shapes > 1000 && again === false && shapesAgain === shapes,
+    `壳 class=${shell} / 第一遍 ${filled} → ${shapes} 个孩子 / 第二遍 ${again} → ${shapesAgain}`)
+}
+
+// B. 真面板：挂载时地图是空的，第一次开门才灌，那行「正在铺开地图…」跟着收。
+{
+  const stageGf = createGameflow({ loadRecords: () => START_LIVE, now: () => NOW, storage: startStub })
+  stageGf.mount()
+  const stageHost = hostNow()
+  const mapIn = () => stageHost.all('gf-map')[0]
+  const atMount = mapIn() ? mapIn().children.length : -1
+  stageGf.open()
+  await tick()
+  await tick()
+  const afterOpen = mapIn() ? mapIn().children.length : -1
+  const notes = stageHost.all('gf-stage-note')
+  check('挂载时地图只建壳、不灌（554 KB 留给第一次开门，面板收着时不付这笔钱）',
+    atMount === 0,
+    `挂载后 ${atMount} 个孩子`)
+  check('第一次开门之后地图灌好了，「正在铺开地图…」那行字收起来',
+    afterOpen > 1000 && notes.length === 1 && notes[0].hidden === true,
+    `开门后 ${afterOpen} 个孩子 / 过渡说明 ${notes.length} 条，hidden=${notes[0] && notes[0].hidden}`)
+  stageGf.destroy()
+}
+
+// C. 取证仪表：两个观察器**都**装。从前是 if / else if，真机 Chromium 123+ 走第一支，
+//    longtask 观察器一次都没装上，`tasks` 于是永远是空数组——t27 因此说不清那 300ms
+//    到底是不是 JS 干的。
+{
+  const seen = []
+  const realPO = globalThis.PerformanceObserver
+  const realFetch = globalThis.fetch
+  globalThis.PerformanceObserver = class {
+    static supportedEntryTypes = ['event', 'long-animation-frame', 'longtask']
+    constructor(cb) { this.cb = cb }
+    observe(opts) { seen.push(opts && opts.type) }
+    disconnect() {}
+  }
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ on: true }) })
+  try {
+    const watchGf = createGameflow({ loadRecords: () => START_LIVE, now: () => NOW, storage: startStub })
+    watchGf.mount()
+    await tick()
+    await tick()
+    await tick()
+    watchGf.destroy()
+  } finally {
+    if (realPO === undefined) delete globalThis.PerformanceObserver
+    else globalThis.PerformanceObserver = realPO
+    if (realFetch === undefined) delete globalThis.fetch
+    else globalThis.fetch = realFetch
+  }
+  check('滚动取证仪表把 LoAF 与 longtask 两个观察器都装上（从前是 if/else，tasks 永远是空的）',
+    seen.includes('long-animation-frame') && seen.includes('longtask'),
+    `装上的：${seen.join(' / ') || '（一个都没装）'}`)
+}
+
+// D. 读数口径（静态）：每一处时刻都是文档原点，缓冲丢了几个有计数，信封上带着可见性与焦点。
+{
+  const src = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
+  const from = src.indexOf('function flushScrollWatch')
+  const body = from < 0 ? '' : src.slice(from, from + 4200)
+  check('取证信封写明原点、带上可见性与焦点、缓冲丢弃有计数（t28 第二、三处读数）',
+    /origin: 'document'/.test(body)
+      && /timeOrigin/.test(body)
+      && /visibilityState/.test(body)
+      && /hasFocus/.test(body)
+      && /firstAt: Math\.round\(watch\.first\)/.test(body)
+      && /dropped: \{ \.\.\.watch\.dropped \}/.test(body),
+    `origin=${/origin: 'document'/.test(body)} / 可见性=${/visibilityState/.test(body)} / 焦点=${/hasFocus/.test(body)} / 丢弃计数=${/dropped: \{ \.\.\.watch\.dropped \}/.test(body)}`)
+  check('滚动轨迹与帧用的是同一个钟：noteScroll 用 perfNow()，落下的 t 就是文档原点（不再减掉第一次）',
+    /const t = perfNow\(\)/.test(src) && /watch\.path\.push\(\{ t: Math\.round\(t\)/.test(src),
+    `perfNow=${/const t = perfNow\(\)/.test(src)} / 文档原点=${/watch\.path\.push\(\{ t: Math\.round\(t\)/.test(src)}`)
+}
+
+// —— t29：记号、涟漪、灯那一层是 HTML，世界→像素得自己算，量早了会偏 ——
+{
+  const src = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
+  const hung = /stage\.appendChild\(stageHandle\.live\)/.test(src)
+  const ttl = /const LIVE_BOX_TTL = \d+/.test(src)
+  const settle = /liveSettleTimer = window\.setTimeout/.test(src)
+  check('三处动静那一层挂在面板的定位容器里，量尺寸有保质期、开门排完版还会再量一次（t29）',
+    hung && ttl && settle,
+    `挂上了=${hung} / 保质期=${ttl} / 开门后再量=${settle}`)
+}
 
 const failed = results.filter((r) => !r.pass)
 if (skipped.length) {
