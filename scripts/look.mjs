@@ -205,6 +205,24 @@ const MEASURE = `(() => {
     timeline: box('.gf-timeline'),
     cols: box('.gf-cols'),
     rows,
+    // 2026-10-31：地名签的字有没有坐在牌子里面。
+    // 用户那张截图里「他的屋子」右半截压在别的东西上——代码把 x 写成牌子中心、
+    // 却没写 text-anchor，SVG 默认 start，于是字从正中起笔往右挤出牌子。
+    // 这里直接问浏览器要字的包围盒（getBBox，用户单位）与牌子的矩形比。
+    place: (() => {
+      const bg = sr.querySelector('.gf-place-bg')
+      const tx = sr.querySelector('.gf-place-text')
+      if (!bg || !tx) return null
+      let ink = null
+      try { ink = tx.getBBox() } catch { ink = null }
+      return {
+        text: tx.textContent || '',
+        anchor: getComputedStyle(tx).textAnchor,
+        plate: { x: Number(bg.getAttribute('x')), y: Number(bg.getAttribute('y')),
+                 w: Number(bg.getAttribute('width')), h: Number(bg.getAttribute('height')) },
+        ink: ink ? { x: +ink.x.toFixed(2), y: +ink.y.toFixed(2), w: +ink.width.toFixed(2), h: +ink.height.toFixed(2) } : null,
+      }
+    })(),
     pageScrollW: document.documentElement.scrollWidth,
     pageClientW: document.documentElement.clientWidth,
   }
@@ -256,6 +274,19 @@ for (const { w, h, m, file } of results) {
   const clipped = m.rows.filter((r) => (r.him && r.him.scrollW > r.him.clientW + 1) || (r.you && r.you.scrollW > r.you.clientW + 1))
   checks.push([`${tag} 两栏的文字都没被挤断（${m.rows.length} 行）`, clipped.length === 0, `${clipped.length} 行溢出`])
   checks.push([`${tag} 截图存了`, existsSync(file), file])
+
+  // 2026-10-31（用户截图报的）：地名签的字必须坐在牌子里面。
+  // 这条能抓的正是「x 写成牌子中心、却没写 text-anchor」——那时字从正中起笔，
+  // 右半截溢出牌子（实测溢出 2.78 个世界单位 ≈ 21px），压在旁边的字与记号上。
+  const pl = m.place
+  const ink = pl && pl.ink
+  const plate = pl && pl.plate
+  const insideX = !!(ink && plate) && ink.x >= plate.x - 0.06 && ink.x + ink.w <= plate.x + plate.w + 0.06
+  const insideY = !!(ink && plate) && ink.y >= plate.y - 0.06 && ink.y + ink.h <= plate.y + plate.h + 0.06
+  checks.push([`${tag} 地名签的字坐在牌子里面（左右不溢出）`, insideX,
+    pl ? `${pl.text || '（空）'}：字 ${ink ? ink.x + '→' + +(ink.x + ink.w).toFixed(2) : '量不到'} / 牌 ${plate ? plate.x + '→' + +(plate.x + plate.w).toFixed(2) : '没有'}（text-anchor ${pl.anchor}）` : '面板上没有地名签'])
+  checks.push([`${tag} 地名签的字坐在牌子里面（上下不溢出）`, insideY,
+    ink && plate ? `字 y ${ink.y}→${+(ink.y + ink.h).toFixed(2)} / 牌 y ${plate.y}→${+(plate.y + plate.h).toFixed(2)}` : '量不到'])
 
   // ── 几何（t33：这些从 smoke 搬过来的，只有真浏览器量得出来）─────────────────
   // 「地图本体宽 = 面板宽 − 44」这条**按现行 CSS 是不成立的**：44 只算了左右各 22px 的留白，
