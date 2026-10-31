@@ -1032,15 +1032,22 @@ export function placeLabel(px, py, text, fs, view, opts = {}) {
         //
         // 2026-10-31：原来只有「每远一档加 0.5」那点软约束，压不住——斜向候选
         // （|sx|=1 且 |sy|=1）两头的偏移会**叠加**，最高一档实际能到 14 格。
-        // 现在加一道**硬闸**：签心离记号超过 limit（默认 6.5 格）的候选一律重罚，
-        // 只在「附近一个都没得选」时才会被迫用上。签存在的意义是指出他在哪，
+        // 现在加一道**硬闸**：签心离记号超过 limit 的候选一律重罚，只在
+        // 「附近一个都没得选」时才会被迫用上。签存在的意义是指出他在哪，
         // 离十几格的签不如不要。
-        const limit = opts.limit === undefined ? 9 : opts.limit
+        //
+        // 硬闸两次收紧：9 → 6.5 → **8**。逐档扫过才发现「更紧」不等于「更好」：
+        // 收到 6.5 时最远确实降到 6.35 格，可最狠那一块牌子被盖掉的比例从 31% 跳到 63%
+        // （霜堡），总面积也从 7.78 涨到 16.15 —— 签是贴上去了，可它把别人的城名糊了。
+        // 8 这一档是拐点：最远 7.86 格、盖最狠 31%、总面积 8.72，三项都比原来的 9 更好。
+        // 见 `.scratch/label-sweep.mjs`（一次性扫掠表）。
+        const limit = opts.limit === undefined ? 8 : opts.limit
         const far = Math.hypot((rect[0] + rect[2]) / 2 - px, (rect[1] + rect[3]) / 2 - py)
-        // 距离用两级：硬闸在 `limit`（默认 9 格，超过一律重罚），软的是每格 0.9 分——
-        // 干净但远一点，会赢过贴脸却把别人一块牌子盖掉一多半。
+        // 距离用两级：硬闸在 `limit`（默认 8 格，超过一律重罚），软的是每格 0.9 分。
+        // 软罚再大就会越过上面那个拐点（farK 1.4 时盖最狠跳到 63%）。
+        const farK = opts.farK === undefined ? 0.9 : opts.farK
         const score = area * 2.2 + worst * worst * 14 + onPin * 4 + (inside ? 0 : 1e6) + (far > limit ? 1e5 : 0)
-          + far * 0.9 + (rung - 1) * 0.5 + rank * 0.5
+          + far * farK + (rung - 1) * 0.5 + rank * 0.5
         if (!best || score < best[0]) best = [score, rect, size]
         if (area === 0 && onPin === 0 && inside && far <= limit) {
           clean = true

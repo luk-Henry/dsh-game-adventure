@@ -6572,7 +6572,7 @@ if (HAVE_MAP_FIXTURE) {
       }
     }
   }
-  check('十三枚地名签都贴着记号（≤ 9 格；改前最远 16 格）', worstDist <= 9,
+  check('十三枚地名签都贴着记号（≤ 8.2 格；改前最远 16 格）', worstDist <= 8.2,
     `最远 ${worstDist.toFixed(2)} 格：${worstDistName}`)
   check('没有一块地图牌子被地名签盖掉超过 35%', worstCover <= 0.35,
     `最狠 ${(worstCover * 100).toFixed(0)}%：${worstCoverName}｜压住总面积 ${pressedArea.toFixed(2)}`)
