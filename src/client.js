@@ -10242,8 +10242,14 @@ let liveSettleTimer = 0
   /**
    * 面板打开之后把焦点挪进去：有选项就落在最上面那颗（那一对按钮才是这一会儿要你做的事），
    * 没有就落在面板本身（`room` 上给了 `tabindex="-1"`）。键盘用户推开门才有落脚点。
+   *
+   * 2026-10-31（用户：「我还没把鼠标放上去，为什么第一个选择会有一个明显的边框？」）：
+   * 焦点是**鼠标推门时也挪了**，而 Chromium 只要上一次交互是键盘，就会把这种
+   * 程序化焦点也算成 `:focus-visible`——于是第一颗按钮自己套了一圈框，看着像已经选中了。
+   * 现在只在**上一次操作是键盘**时才挪焦点：鼠标点开的门，焦点留在原地，那颗框就不会凭空出现。
    */
   function focusInto() {
+    if (!inputWasKeyboard) return
     const first = openForkEl && typeof openForkEl.querySelector === 'function'
       ? openForkEl.querySelector('.gf-choice-pick')
       : null
@@ -10253,6 +10259,9 @@ let liveSettleTimer = 0
     }
     if (typeof room.focus === 'function') room.focus()
   }
+
+  /** 上一次操作是键盘还是指针（只用来决定「开门要不要把焦点挪进去」，见上面的 focusInto）。 */
+  let inputWasKeyboard = false
 
   /**
    * 面板收着的时候重算门上那枚记号——**它不自己算，它照见闻录那台机器真画一遍、读它的数**。
@@ -10936,6 +10945,7 @@ let liveSettleTimer = 0
   }
 
   function onKeydown(e) {
+    inputWasKeyboard = true
     if (e.key !== 'Escape') return
     /* 界面审计 U10（与地图审计 M-1 是同一个 bug）：细节版开着的时候，Esc 的第一层意思
        是「回全图」——从前这里不管三七二十一先 setOpen(false)，一巴掌把整块面板关掉，
@@ -10957,6 +10967,7 @@ let liveSettleTimer = 0
   }
 
   function onPointerDown(e) {
+    inputWasKeyboard = false
     const path = e.composedPath()
     // 点面板外关掉；点门由门自己处理。留住了就谁点都不收（用户 m11003 第 3 条）。
     if (pinned) return

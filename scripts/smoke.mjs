@@ -4927,12 +4927,17 @@ check('选项：这一对按钮长在「此刻」那一格那一行上（折叠�
   + `那一卷里 ${mRollRow ? mRollRow.all('gf-choice-live').length : '?'} 处选项・`
   + `${mRollRow ? mRollRow.all('gf-fork-line').length : '?'} 句命运`)
 
-// 焦点：面板一打开就该落进来（用户 m12690 那份清单的第 4 条真缺陷）。有得挑就落在第一颗选项上，
-// 没得挑（面板记不住）就落在面板本身——所以面板要 `tabindex="-1"`，不然程序收不住它。
+// 焦点（2026-10-31 改口径。用户：「我还没把鼠标放上去，为什么第一个选择会有一个明显的边框？」）：
+// 从前面板一打开就抢焦点、落在第一颗选项上；而 Chromium 只要上一次交互是键盘，就会把这种
+// 程序化焦点也算成 `:focus-visible`——于是一颗还没碰的按钮自己套了一圈框，看着像已经选中了。
+// 现在只在**上一次操作是键盘**时才挪焦点（`focusInto` 里的 `inputWasKeyboard`）；
+// 自检这一路等于鼠标推门，所以**不该有任何东西被抢走**。
 const mFocused = FOCUSES[FOCUSES.length - 1]
-check('选项：面板一打开，焦点就落在第一颗选项上（不再留在门外）',
-  !!mFocused && mFocused.classList.contains('gf-choice-pick'),
-  `最后落在${mFocused ? '那一颗选项上' : '别处'}`)
+check('选项：鼠标推开门不抢焦点（那一圈框不会凭空出现在第一颗上）',
+  !mFocused || !mFocused.classList.contains('gf-choice-pick'),
+  `最后落在${mFocused
+    ? (mFocused.classList.contains('gf-choice-pick') ? '第一颗选项上（不该）' : '别处')
+    : '没有挪过'}`)
 check('选项：有命运的那一段自己认得出来（左边压一道金线）',
   mhost.all('gf-moment').length === 1 && mhost.all('gf-choice-live').length === 1
   && /\.gf-choice-live\s*\{[^}]*border-left:\s*1px solid var\(--gf-fork-rule/.test(mStyle),
@@ -5103,9 +5108,11 @@ check('门上那枚记号：面板记不住的时候不亮（摆了也挑不成�
   `${noPickHost.all('gf-choice-pick').length} 颗 / ${noPickHost.all('gf-choice-done').length} 段走完的 / `
   + `${noPickHost.all('gf-choice-said').map((e) => e.textContent).join('/') || '一个字都没写'}`)
 const noPickFocused = FOCUSES[FOCUSES.length - 1]
-check('选项：面板记不住的时候，焦点落在面板本身（没有选项可落）',
-  !!noPickFocused && noPickFocused.classList.contains('gf-room'),
-  `最后落在${noPickFocused ? (noPickFocused.classList.contains('gf-room') ? '面板上' : '别处') : '没有'}`)
+check('选项：面板记不住的时候同样不抢焦点（鼠标推门，焦点留在原地）',
+  !noPickFocused || !noPickFocused.classList.contains('gf-room'),
+  `最后落在${noPickFocused
+    ? (noPickFocused.classList.contains('gf-room') ? '面板上（不该）' : '别处')
+    : '没有挪过'}`)
 noPickGf.destroy()
 
 // 常驻按钮（用户 m11003 第 3 条；用户 m19425 第 1 条把它从门边挪到地图右上角，并改成图钉）。
