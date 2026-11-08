@@ -148,7 +148,7 @@ await send('Page.enable')
 
 /** 在页面里量一遍：坐标都换算成视口坐标，够断言用。 */
 const MEASURE = `(() => {
-  const host = [...document.querySelectorAll('[data-dsh-gameflow]')].pop()
+  const host = [...document.querySelectorAll('[data-dsh-game-adventure]')].pop()
   if (!host || !host.shadowRoot) return { err: '没找到面板' }
   const sr = host.shadowRoot
   const box = (sel) => {

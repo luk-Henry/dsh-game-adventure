@@ -1,4 +1,4 @@
-# 门后 · dsh-gameflow
+# 门后 · dsh-game-adventure
 
 > 你在这一头干活，他在那一头过日子。你们用的是同一个下午。
 
@@ -18,7 +18,7 @@ DSH 的陪伴类插件。右下角一扇 64×64 的小木门，推开是一张�
 ## 装
 
 ```bash
-dsh plugin add dsh-gameflow
+dsh plugin add dsh-game-adventure
 ```
 
 装完重启 DSH，右下角就会出现那扇小木门。
@@ -64,7 +64,7 @@ node scripts/preview.mjs        # http://127.0.0.1:5180
 **彻底卸载**：
 
 ```bash
-dsh plugin remove dsh-gameflow
+dsh plugin remove dsh-game-adventure
 ```
 
 ---

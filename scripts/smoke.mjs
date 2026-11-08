@@ -350,12 +350,12 @@ const demo = [
     actions: 27,
     counts: { 改文件: 12, 跑命令: 9, 翻文件: 6 },
     files: [
-      'D:\\文档合集\\插件\\dsh-gameflow\\src\\client.js',
-      'D:\\文档合集\\插件\\dsh-gameflow\\scripts\\smoke.mjs',
+      'D:\\文档合集\\插件\\dsh-game-adventure\\src\\client.js',
+      'D:\\文档合集\\插件\\dsh-game-adventure\\scripts\\smoke.mjs',
     ],
     deliverables: [
-      'D:\\文档合集\\插件\\dsh-gameflow\\回望厅-设计文档.md',
-      'D:\\文档合集\\插件\\dsh-gameflow\\README.md',
+      'D:\\文档合集\\插件\\dsh-game-adventure\\回望厅-设计文档.md',
+      'D:\\文档合集\\插件\\dsh-game-adventure\\README.md',
     ],
     helpers: ['Research DSH host plugin API', 'Research DSH client plugin API'],
   },
@@ -364,7 +364,7 @@ const demo = [
     startedAt: at(1, 23, 50),
     endedAt: at(2, 0, 40),
     minutes: 50,
-    title: '# 最终方案总结：`dsh-gameflow`',
+    title: '# 最终方案总结：`dsh-game-adventure`',
     tags: ['很晚了', '查资料', '改文件'],
     actions: 9,
     counts: { 改文件: 4, 查资料: 2 },
@@ -2202,7 +2202,7 @@ const storeStub = {
 const gf = createGameflow({ loadRecords: () => demo, now: () => NOW, storage: storeStub })
 gf.mount()
 
-const host = document.body.children.find((c) => 'data-dsh-gameflow' in c.attributes)
+const host = document.body.children.find((c) => 'data-dsh-game-adventure' in c.attributes)
 check('挂载到 body', !!host)
 
 const shadow = host.shadowRoot
@@ -2394,7 +2394,7 @@ const gfNight = createGameflow({ loadRecords: () => demo, now: () => NOW + 6 * 3
 gfNight.mount()
 gfNight.open()
 await tick()
-const nightStage = document.body.children.filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const nightStage = document.body.children.filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 // 2026-10-08（第三十六版）：这三条原来是反的（记号收起来、`data-place` 清掉、
 // 地名签收起来、地点那行写「地图外面」）。用户拍的是「角色必须一直显示在地图上」，
 // 所以现在记号照在、`data-place` 是 `home`、地名签与状态行都写「落脚处」。
@@ -2515,7 +2515,7 @@ const clockGf = createGameflow({
 clockGf.mount()
 clockGf.open()
 await new Promise((r) => setTimeout(r, 80))
-const clockHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const clockHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const whenNow = () => clockHost.all('gf-when')[0]?.textContent
 const headNow = () => clockHost.all('gf-v')[0]?.textContent
 const readsAtOpen = clockReads
@@ -2595,7 +2595,7 @@ const snapGf = createGameflow({
 })
 snapGf.mount()
 await new Promise((r) => setTimeout(r, 60))
-const snapHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const snapHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const snapWhen = (i) => snapHost.all('gf-row')[i]?.all('gf-when')[0]?.textContent
 const snapRow = (i) => snapHost.all('gf-row')[i]
 // 用户 2026-10-08 第 2 条：「时间落盘是错误的，我要的是每5分钟落一次，不要折叠。
@@ -2644,7 +2644,7 @@ const shortGf = createGameflow({
 })
 shortGf.mount()
 await new Promise((r) => setTimeout(r, 60))
-const shortHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const shortHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('短段不凑整（3 分钟还是 3 分钟，不会被写成 5 分钟）',
   shortHost.all('gf-when')[0]?.textContent === '今天 19:50 – 19:55 · 3 分钟',
   shortHost.all('gf-when')[0]?.textContent)
@@ -2694,7 +2694,7 @@ const foldCards = [
 const foldGf = createGameflow({ loadRecords: () => foldCards, now: () => at(0, 20, 0) })
 foldGf.mount()
 await new Promise((r) => setTimeout(r, 60))
-const folforkDeathHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const folforkDeathHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const folforkDeathRows = folforkDeathHost.all('gf-row')
 const dayRows = folforkDeathHost.all('gf-row-day')
 const foldWhen = (i) => folforkDeathRows[i]?.all('gf-when')[0]?.textContent
@@ -2754,7 +2754,7 @@ const rollCards = [
 const rollGf = createGameflow({ loadRecords: () => rollCards, now: () => at(0, 20, 0) })
 rollGf.mount()
 await new Promise((r) => setTimeout(r, 60))
-const rollHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const rollHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const rollRows = rollHost.all('gf-row')
 check('十天前 / 七十天前 / 四百天前的卡一张都不进见闻录',
   rollRows.length === 0, `实际 ${rollRows.length} 行`)
@@ -2789,7 +2789,7 @@ const rowsForHistory = async (days) => {
   const gf = createGameflow({ loadRecords: () => spread(days), now: () => at(0, 20, 0) })
   gf.mount()
   await new Promise((r) => setTimeout(r, 60))
-  const host = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+  const host = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
   const n = host.all('gf-row').length
   gf.destroy()
   return n
@@ -3258,7 +3258,7 @@ await tick()
 check('没有记录时显示空状态',
   document.body.all('gf-empty').some((n) => n.textContent === '他还没走过多远。'),
   document.body.all('gf-empty')[0]?.textContent)
-const emptyHost = document.body.children.filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const emptyHost = document.body.children.filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('空屋子也画出来（地方一直在，只是没人）', emptyHost.all('gf-stage').length === 1)
 check('没有任何记录时不列见闻录', emptyHost.all('gf-row').length === 0)
 check('没有任何记录时两栏表头也收起来', emptyHost.all('gf-cols-head')[0]?.hidden === true)
@@ -3310,7 +3310,7 @@ check('host 半边导出了 apply 形状的 inject', Array.isArray(hostInject) &
 // 危险：apply() 里的回填会读、甚至写 $DSH_HOME/gameflow/records.json。
 // 测试绝不能碰用户真那份记录，所以先把它指到一个临时目录（下面会还原）。
 const savedHomeForHostTests = process.env.DSH_HOME
-process.env.DSH_HOME = join(tmpdir(), `dsh-gameflow-smoke-${process.pid}`)
+process.env.DSH_HOME = join(tmpdir(), `dsh-game-adventure-smoke-${process.pid}`)
 
 const seen = { events: [], warned: [], effect: 0, registered: null, handlers: {} }
 const fakeCtx = {
@@ -3334,7 +3334,7 @@ check('apply() 不抛异常', applyThrew === null, String(applyThrew))
 check('订上了四个会话事件',
   ['session/created', 'session/event', 'session/flush', 'session/disposed']
     .every((t) => seen.events.includes(t)), seen.events.join(','))
-check('注册了 prefix 路由且路径对', seen.registered?.kind === 'prefix' && seen.registered?.path === '/dsh-gameflow')
+check('注册了 prefix 路由且路径对', seen.registered?.kind === 'prefix' && seen.registered?.path === '/dsh-game-adventure')
 check('走 ctx.effect 注册（路由 + 定时落盘，都可清理）', seen.effect === 2, String(seen.effect))
 
 /* ---- 定时落盘：第三轮加的（m02673「好，要。」） ---- */
@@ -3464,7 +3464,7 @@ check('存储版本号是 9（加字段就 +1，回填才会重跑）', STORE_VE
 // 重复挂载（比如两条通道同时生效）只会被记一笔日志，不该炸 boot
 const dupCtx = {
   ...fakeCtx,
-  webServer: { register() { throw new Error('webserver: duplicate prefix route "/dsh-gameflow"') } },
+  webServer: { register() { throw new Error('webserver: duplicate prefix route "/dsh-game-adventure"') } },
 }
 let dupThrew = null
 try {
@@ -3480,16 +3480,16 @@ const fakeRes = () => {
   return out
 }
 const ok = fakeRes()
-await seen.registered.handler({ method: 'GET', url: '/dsh-gameflow/records' }, ok)
+await seen.registered.handler({ method: 'GET', url: '/dsh-game-adventure/records' }, ok)
 check('路由回 200 + JSON', ok.code === 200 && String(ok.headers['content-type']).startsWith('application/json'))
 check('回的是 {version, records}', JSON.parse(ok.body).version === STORE_VERSION && Array.isArray(JSON.parse(ok.body).records),
   String(JSON.parse(ok.body).version))
 check('不让缓存', ok.headers['cache-control'] === 'no-store')
 const miss = fakeRes()
-await seen.registered.handler({ method: 'GET', url: '/dsh-gameflow/nope' }, miss)
+await seen.registered.handler({ method: 'GET', url: '/dsh-game-adventure/nope' }, miss)
 check('无关路径回 404', miss.code === 404)
 const post = fakeRes()
-await seen.registered.handler({ method: 'POST', url: '/dsh-gameflow/records' }, post)
+await seen.registered.handler({ method: 'POST', url: '/dsh-game-adventure/records' }, post)
 check('POST 回 404', post.code === 404)
 
 // ---------------------------------------------------------------------------
@@ -3514,22 +3514,22 @@ check('POST 回 404', post.code === 404)
   }
 
   const off = fakeRes()
-  await seen.registered.handler(fakeReq('GET', '/dsh-gameflow/measure'), off)
+  await seen.registered.handler(fakeReq('GET', '/dsh-game-adventure/measure'), off)
   check('量尺寸：没放开关文件就说「没开」', JSON.parse(off.body).on === false, String(off.body))
 
   const denied = fakeRes()
-  await seen.registered.handler(fakeReq('POST', '/dsh-gameflow/measure', JSON.stringify({ panel: {} })), denied)
+  await seen.registered.handler(fakeReq('POST', '/dsh-game-adventure/measure', JSON.stringify({ panel: {} })), denied)
   check('量尺寸：开关没开时 POST 回 403（插件不会偷偷往外报自己的尺寸）',
     denied.code === 403, String(denied.code))
 
   writeFileSync(switchPath, '', 'utf8')
   const on = fakeRes()
-  await seen.registered.handler(fakeReq('GET', '/dsh-gameflow/measure'), on)
+  await seen.registered.handler(fakeReq('GET', '/dsh-game-adventure/measure'), on)
   check('量尺寸：放了开关文件就说「开着」', JSON.parse(on.body).on === true, String(on.body))
 
   const saved = fakeRes()
   const payload = { panel: { w: 560, h: 720 }, items: [{ name: 'stage svg 地图', x: 22 }], map: '<svg id="map"></svg>' }
-  await seen.registered.handler(fakeReq('POST', '/dsh-gameflow/measure', JSON.stringify(payload)), saved)
+  await seen.registered.handler(fakeReq('POST', '/dsh-game-adventure/measure', JSON.stringify(payload)), saved)
   check('量尺寸：开着就写下去', saved.code === 200 && JSON.parse(saved.body).ok === true, String(saved.body))
   check('量尺寸：layout.json 里是逐块的位置（map 与 items 都在）',
     JSON.parse(readFileSync(layoutPath, 'utf8')).items?.[0]?.x === 22, readFileSync(layoutPath, 'utf8').slice(0, 80))
@@ -3537,18 +3537,18 @@ check('POST 回 404', post.code === 404)
     readFileSync(mapPath, 'utf8').includes('id="map"'))
 
   const bad = fakeRes()
-  await seen.registered.handler(fakeReq('POST', '/dsh-gameflow/measure', '{这不是 JSON'), bad)
+  await seen.registered.handler(fakeReq('POST', '/dsh-game-adventure/measure', '{这不是 JSON'), bad)
   check('量尺寸：body 不是 JSON 回 400（不把宿主绊倒）', bad.code === 400, String(bad.code))
 
   // 取证通道只给本机：外面的来源一律 403（不是鉴权体系，是一道门闩）
   const outside = fakeRes()
-  await seen.registered.handler(fakeReq('GET', '/dsh-gameflow/measure', null, '10.1.2.3'), outside)
+  await seen.registered.handler(fakeReq('GET', '/dsh-game-adventure/measure', null, '10.1.2.3'), outside)
   check('量尺寸：非本机来源回 403（取证通道不出门）', outside.code === 403, String(outside.code))
   const outsidePost = fakeRes()
-  await seen.registered.handler(fakeReq('POST', '/dsh-gameflow/measure', JSON.stringify({ panel: {} }), '::ffff:10.1.2.3'), outsidePost)
+  await seen.registered.handler(fakeReq('POST', '/dsh-game-adventure/measure', JSON.stringify({ panel: {} }), '::ffff:10.1.2.3'), outsidePost)
   check('量尺寸：非本机来源连 POST 也进不来', outsidePost.code === 403, String(outsidePost.code))
   const loop6 = fakeRes()
-  await seen.registered.handler(fakeReq('GET', '/dsh-gameflow/measure', null, '::1'), loop6)
+  await seen.registered.handler(fakeReq('GET', '/dsh-game-adventure/measure', null, '::1'), loop6)
   check('量尺寸：IPv6 回环也认（::1）', loop6.code === 200 && JSON.parse(loop6.body).on === true, String(loop6.body))
   check('量尺寸：写盘是原子的（目录里不留 .tmp）',
     readdirSync(join(process.env.DSH_HOME, 'gameflow', 'measure')).every((n) => !n.endsWith('.tmp')),
@@ -3556,7 +3556,7 @@ check('POST 回 404', post.code === 404)
 
   rmSync(switchPath, { force: true })
   const again = fakeRes()
-  await seen.registered.handler(fakeReq('GET', '/dsh-gameflow/measure'), again)
+  await seen.registered.handler(fakeReq('GET', '/dsh-game-adventure/measure'), again)
   check('量尺寸：删掉开关文件就停', JSON.parse(again.body).on === false, String(again.body))
 }
 
@@ -3601,7 +3601,7 @@ check('POST 回 404', post.code === 404)
   const readStoreNow = () => JSON.parse(readFileSync(storePath, 'utf8'))
 
   const pressed = fakeRes()
-  await seen.registered.handler(reqOf('POST', '/dsh-gameflow/start', JSON.stringify({ at: startAt })), pressed)
+  await seen.registered.handler(reqOf('POST', '/dsh-game-adventure/start', JSON.stringify({ at: startAt })), pressed)
   const pressedBody = JSON.parse(pressed.body || '{}')
   check('按下开始冒险：路由回 200 + ok（界面只在真的写成时才掀幕布）',
     pressed.code === 200 && pressedBody.ok === true, String(pressed.body))
@@ -3612,7 +3612,7 @@ check('POST 回 404', post.code === 404)
     `${readStoreNow().records.map((r) => r.id).join(',')} / dropped=${pressedBody.dropped}`)
 
   const recordsAfter = fakeRes()
-  await seen.registered.handler(reqOf('GET', '/dsh-gameflow/records'), recordsAfter)
+  await seen.registered.handler(reqOf('GET', '/dsh-game-adventure/records'), recordsAfter)
   const polled = JSON.parse(recordsAfter.body || '{}')
   check('取数据的应答带上 dayStart（界面靠它裁掉起点之前那几格）',
     polled.dayStart === startAt && polled.records.map((r) => r.id).join(',') === 'after-start',
@@ -3629,16 +3629,16 @@ check('POST 回 404', post.code === 404)
 
   // 不许乱按：非 POST、坏 JSON、缺 at、非本机回环——四种都该被挡在门外。
   const wrongMethod = fakeRes()
-  await seen.registered.handler(reqOf('GET', '/dsh-gameflow/start'), wrongMethod)
+  await seen.registered.handler(reqOf('GET', '/dsh-game-adventure/start'), wrongMethod)
   check('按下开始冒险：GET 回 405（它是写路由）', wrongMethod.code === 405, String(wrongMethod.code))
   const badJson = fakeRes()
-  await seen.registered.handler(reqOf('POST', '/dsh-gameflow/start', '{这不是 JSON'), badJson)
+  await seen.registered.handler(reqOf('POST', '/dsh-game-adventure/start', '{这不是 JSON'), badJson)
   check('按下开始冒险：body 不是 JSON 回 400', badJson.code === 400, String(badJson.code))
   const noAt = fakeRes()
-  await seen.registered.handler(reqOf('POST', '/dsh-gameflow/start', JSON.stringify({})), noAt)
+  await seen.registered.handler(reqOf('POST', '/dsh-game-adventure/start', JSON.stringify({})), noAt)
   check('按下开始冒险：没有 at 回 400（不拿宿主的钟瞎猜）', noAt.code === 400, String(noAt.code))
   const outsideStart = fakeRes()
-  await seen.registered.handler(reqOf('POST', '/dsh-gameflow/start', JSON.stringify({ at: startAt }), '10.1.2.3'), outsideStart)
+  await seen.registered.handler(reqOf('POST', '/dsh-game-adventure/start', JSON.stringify({ at: startAt }), '10.1.2.3'), outsideStart)
   check('按下开始冒险：非本机来源回 403', outsideStart.code === 403, String(outsideStart.code))
 }
 
@@ -3666,7 +3666,7 @@ check('五分钟以内 → 「一小会儿」',
 // 见 src/index.js 里 event() 的那一段），到最后一个事件的 time 收尾
 let fake = 1000
 const rec = createRecorder({ now: () => fake })
-const session = { id: 's1', header: { createdAt: 1_000_000, cwd: 'D:\\文档合集\\插件\\dsh-gameflow' } }
+const session = { id: 's1', header: { createdAt: 1_000_000, cwd: 'D:\\文档合集\\插件\\dsh-game-adventure' } }
 rec.created(session)
 rec.event(session, { type: 'user/message', time: 1_060_000 })
 rec.event(session, { type: 'tool/call', time: 1_090_000, data: { name: 'edit' } })
@@ -3674,7 +3674,7 @@ rec.event(session, { type: 'tool/call', time: 1_095_000, data: { name: 'edit' } 
 rec.event(session, { type: 'tool/result', time: 3_700_000 })
 const card = rec.disposed(session)
 check('时长只算挨着的空隙，挂着过夜不算', card.minutes === 1, `${card.minutes} 分钟`)
-check('项目名取自 cwd 最后一段', card.project === 'dsh-gameflow', String(card.project))
+check('项目名取自 cwd 最后一段', card.project === 'dsh-game-adventure', String(card.project))
 check('数了两次 edit', card.tags.includes('改文件'), card.tags.join('/'))
 check('没读消息文本：card 上没有正文类字段',
   !('content' in card) && !('text' in card) && !('messages' in card))
@@ -3713,7 +3713,7 @@ titled.event(ts, { type: 'user/message', time: 900 })
 titled.event(ts, {
   type: 'session/title',
   time: 1000,
-  data: { title: '# 最终方案总结：`dsh-gameflow`', source: { kind: 'fallback' } },
+  data: { title: '# 最终方案总结：`dsh-game-adventure`', source: { kind: 'fallback' } },
 })
 check('兜底标题也收下', titled.snapshot()[0].title.startsWith('# 最终方案'), titled.snapshot()[0].title)
 titled.event(ts, { type: 'session/title', time: 2000, data: { title: '回顾厅', source: { kind: 'user' } } })
@@ -3906,7 +3906,7 @@ const stubFetch = (impl) => {
 let fCalls = stubFetch(async () => ({ ok: true, json: async () => ({ version: 1, records: [{ id: 'a' }] }) }))
 let fOut = await fetchRecords()
 check('要记录：拿到宿主回的 records', fOut.length === 1 && fOut[0].id === 'a', JSON.stringify(fOut))
-check('要记录：请求的就是那条路由', fCalls[0]?.url === '/dsh-gameflow/records', String(fCalls[0]?.url))
+check('要记录：请求的就是那条路由', fCalls[0]?.url === '/dsh-game-adventure/records', String(fCalls[0]?.url))
 check('要记录：带 accept: application/json', fCalls[0]?.init?.headers?.accept === 'application/json')
 
 fCalls = stubFetch(async () => ({ ok: false, json: async () => ({}) }))
@@ -3947,7 +3947,7 @@ check('环境里没有 fetch：当作空屋子', Array.isArray(fOut) && fOut.len
   let asked = 0
   const posted = []
   stubFetch(async (url, init) => {
-    if (url === '/dsh-gameflow/measure') {
+    if (url === '/dsh-game-adventure/measure') {
       if (init && init.method === 'POST') {
         posted.push(JSON.parse(init.body))
         return { ok: true, json: async () => ({ ok: true }) }
@@ -3981,7 +3981,7 @@ check('环境里没有 fetch：当作空屋子', Array.isArray(fOut) && fOut.len
   // 开关关着：问了，但不该往外发任何东西
   const quiet = []
   stubFetch(async (url, init) => {
-    if (url === '/dsh-gameflow/measure' && init && init.method === 'POST') quiet.push(init.body)
+    if (url === '/dsh-game-adventure/measure' && init && init.method === 'POST') quiet.push(init.body)
     return { ok: true, json: async () => ({ on: false }) }
   })
   const offGf = createGameflow({ loadRecords: () => demo, now: () => NOW, measureDelay: 0 })
@@ -4010,7 +4010,7 @@ check('lib/client.js 没有 import 语句', !/^\s*import\s/m.test(bundleCode))
 // 用经典 script 的方式执行真正的产物：顶层有 export 会在这里 SyntaxError
 vm.runInThisContext(bundleCode, { filename: 'lib/client.js' })
 check('跑起来就调了 __ModuleLoader__.load', loaded !== null)
-check('id 就是包名', loaded?.id === 'dsh-gameflow', String(loaded?.id))
+check('id 就是包名', loaded?.id === 'dsh-game-adventure', String(loaded?.id))
 
 const mod = loaded.factory(() => {
   throw new Error('客户端 bundle 不该 require 任何东西')
@@ -4366,7 +4366,7 @@ const rgf = createGameflow({ loadRecords: () => RED_ROWS, now: () => NOW })
 rgf.mount()
 rgf.open()
 await tick()
-const rhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const rhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const himText = rhost.all('gf-him-col').map((e) => e.textContent)
 const youText = rhost.all('gf-you').map((e) => e.textContent)
 check('红线：右栏（他那一栏）一个阿拉伯数字都没有',
@@ -4389,7 +4389,7 @@ const ngf = createGameflow({ loadRecords: () => NO_ID_ROWS, now: () => NOW })
 ngf.mount()
 ngf.open()
 await tick()
-const nhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const nhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const nHim = nhost.all('gf-him-col').map((e) => e.textContent)
 check('缺 id 的记录也照样有句子（不是整行被跳过）',
   nHim.length === RED_TODAY.length && nHim.every((t) => t.trim().length > 0),
@@ -4432,7 +4432,7 @@ const mgf = createGameflow({ loadRecords: () => MOMENT_DAYS, now: () => NOW })
 mgf.mount()
 mgf.open()
 await tick()
-const mhostM = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const mhostM = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const mBlocks = mhostM.all('gf-moment')
 const mLines = mBlocks.flatMap((b) => b.all('gf-moment-line').map((e) => e.textContent))
 const mHim = mhostM.all('gf-him-col').map((e) => e.textContent)
@@ -4458,7 +4458,7 @@ const mgf2 = createGameflow({ loadRecords: () => MOMENT_DAYS, now: () => NOW })
 mgf2.mount()
 mgf2.open()
 await tick()
-const mhost2 = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const mhost2 = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const mLines2 = mhost2.all('gf-moment').flatMap((b) => b.all('gf-moment-line').map((e) => e.textContent))
 check('高光事件：同一份记录看两眼，一个字都不变',
   mLines.length > 0 && mLines.join('\n') === mLines2.join('\n'),
@@ -4635,7 +4635,7 @@ const pgf = createGameflow({ loadRecords: () => PICK_DAYS, now: () => NOW, stora
 pgf.mount()
 pgf.open()
 await tick()
-const phost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const phost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const pickBars = phost.all('gf-choice-live')
 const pickBtns = phost.all('gf-choice-pick')
 const lookLine = (phost.all('gf-choice-look')[0] || {}).textContent || ''
@@ -4668,7 +4668,7 @@ const rolledGf = createGameflow({ loadRecords: () => PICK_DAYS, now: () => NOW +
 rolledGf.mount()
 rolledGf.open()
 await tick()
-const rolledHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const rolledHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const rolledBtns = rolledHost.all('gf-choice-pick')
 check('命运：折叠状态动不了它——同一份记录晚看 45 分钟，摆的还是同一件、同样两条路',
   rolledHost.all('gf-choice-live').length === 1 && rolledBtns.length === 2
@@ -4706,7 +4706,7 @@ const plantedGf = createGameflow({ loadRecords: () => PICK_DAYS, now: () => NOW,
 plantedGf.mount()
 plantedGf.open()
 await tick()
-const plantedHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const plantedHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const plantedBtns = plantedHost.all('gf-choice-pick')
 const plantedWant = meetFork.roads.map((r) => r.id).join(' ')
 check('命运：存储里钉着哪一件，面板就摆哪一件（重启走的就是这条路）',
@@ -4728,7 +4728,7 @@ const laterGf = createGameflow({ loadRecords: () => laterDays, now: () => NOW + 
 laterGf.mount()
 laterGf.open()
 await tick()
-const laterHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const laterHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const laterRows = laterHost.all('gf-row')
 const laterTail = laterHost.all('gf-row-tail')
 check('命运：没定下来之前，他那边一概不进这一遍（晚看 45 分钟、中间又干了一段，右栏还是那几行）',
@@ -4785,7 +4785,7 @@ const pgf2 = createGameflow({ loadRecords: () => PICK_DAYS, now: () => NOW, stor
 pgf2.mount()
 pgf2.open()
 await tick()
-const phost2 = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const phost2 = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('命运：同一个存储再看一遍，还是你挑的那条',
   phost2.all('gf-choice-pick').length === 0
   && phost2.all('gf-fork-line').map((e) => e.textContent).join('\n') === (keepOut ? keepOut.beats.join('\n') : ''),
@@ -4798,7 +4798,7 @@ const deathGf = createGameflow({ loadRecords: () => PICK_DAYS, now: () => NOW, s
 deathGf.mount()
 deathGf.open()
 await tick()
-const forkDeathHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const forkDeathHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 forkDeathHost.all('gf-choice-pick')[0].dispatch('click')   // 魔窟
 await tick()
 const deathLines = forkDeathHost.all('gf-death-line').map((e) => e.textContent)
@@ -4828,7 +4828,7 @@ const nostoreGf = createGameflow({ loadRecords: () => PICK_DAYS, now: () => NOW,
 nostoreGf.mount()
 nostoreGf.open()
 await tick()
-const nostoreHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const nostoreHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('命运：没有存储就不摆按钮，书自己走主线那一支（暗堡那一条）',
   nostoreHost.all('gf-choice-pick').length === 0
   && nostoreHost.all('gf-fork-line').length === (keepOut ? keepOut.beats.length : -1)
@@ -4889,7 +4889,7 @@ const missGf = createGameflow({ loadRecords: () => MISS_DAYS, now: () => NOW, st
 missGf.mount()
 missGf.open()
 await tick()
-const mhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const mhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const mStyle = String((mhost.allTag('STYLE')[0] || {}).textContent || '')
 const mBadge = () => mhost.all('gf-door-badge')[0]
 const mDoor = () => mhost.all('gf-door')[0]
@@ -5015,7 +5015,7 @@ const staleGf = createGameflow({ loadRecords: () => STALE_DAYS, now: () => NOW, 
 staleGf.mount()
 staleGf.open()
 await tick()
-const shost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const shost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const sWhens = shost.all('gf-when').map((e) => e.textContent).join(' ')
 check('命运：没定下来就一直摆着，而且停在**屏幕上最新那一行**（当下），比它晚的什么都不写',
   shost.all('gf-choice-live').length === 1 && shost.all('gf-choice-pick').length === 2
@@ -5053,7 +5053,7 @@ const rollforkGf = createGameflow({
 rollforkGf.mount()
 rollforkGf.open()
 await tick()
-const rfhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const rfhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('命运：算不出起头那一格时（今天只剩一卷）也不许把整条见闻录滤空',
   rfhost.all('gf-row').length >= 1 && rfhost.all('gf-choice-live').length === 1
   && rfhost.all('gf-choice-pick').length === 2 && rfhost.all('gf-wait').length === 1,
@@ -5082,7 +5082,7 @@ const ytdGf = createGameflow({ loadRecords: () => YESTERDAY_DAYS, now: () => NOW
 ytdGf.mount()
 ytdGf.open()
 await tick()
-const yhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const yhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('选项：昨天那一条根本不进见闻录，所以没有「昨天的岔口」可等',
   yhost.all('gf-row').length === 1 && yhost.all('gf-choice').length === 0
   && yhost.all('gf-choice-pick').length === 0
@@ -5099,7 +5099,7 @@ const noPickGf = createGameflow({ loadRecords: () => MISS_DAYS, now: () => NOW, 
 noPickGf.mount()
 noPickGf.open()
 await tick()
-const noPickHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const noPickHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('门上那枚记号：面板记不住的时候不亮（摆了也挑不成，亮着就是骗人）',
   noPickHost.all('gf-door-badge')[0].hidden === true && noPickHost.all('gf-choice-pick').length === 0
   && noPickHost.all('gf-choice-done').length === 1 && noPickHost.all('gf-choice-said').length === 1
@@ -5154,7 +5154,7 @@ if (pinKey) pinStore2.setItem(pinKey, '1')
 const pinGf2 = createGameflow({ loadRecords: () => MISS_DAYS, now: () => NOW, storage: pinStore2 })
 pinGf2.mount()
 await tick()
-const pinHost2 = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const pinHost2 = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('常驻按钮：上次钉住了，这次挂上就自己开着',
   pinHost2.all('gf-room')[0].classList.contains('gf-open')
   && pinHost2.all('gf-always')[0].getAttribute('aria-pressed') === 'true',
@@ -5176,7 +5176,7 @@ const badgeGf = createGameflow({ loadRecords: () => MISS_DAYS, now: () => NOW, s
 badgeGf.mount()
 badgeGf.open()
 await tick()
-const bhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const bhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const bStyle = String((bhost.allTag('STYLE')[0] || {}).textContent || '')
 const bBadge = () => bhost.all('gf-door-badge')[0]
 const bRoom = () => bhost.all('gf-room')[0]
@@ -5297,7 +5297,7 @@ const nullGf = createGameflow({
 nullGf.mount()
 nullGf.open()
 await new Promise((r) => setTimeout(r, 80))
-const nullHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const nullHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 nullGf.close()
 await new Promise((r) => setTimeout(r, 400))
 const nullReadsBefore = nullReads
@@ -5334,7 +5334,7 @@ const c1gf = createGameflow({ loadRecords: () => C1_DAYS, now: () => NOW })
 c1gf.mount()
 c1gf.open()
 await tick()
-const c1host = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const c1host = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const c1Days = c1host.all('gf-row-day')
 // 行是从新往旧画的：只讲今天之后，这里就只剩今天那半截卷一行。
 const c1Opens = c1Days.map((r) => r.all('gf-day-open').map((e) => e.textContent))
@@ -5368,7 +5368,7 @@ const c1gf2 = createGameflow({ loadRecords: () => C1_DAYS, now: () => NOW })
 c1gf2.mount()
 c1gf2.open()
 await tick()
-const c1host2 = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const c1host2 = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const c1Again = c1host2.all('gf-row-day').map((r) => [
   ...r.all('gf-day-open').map((e) => e.textContent),
   ...r.all('gf-day-close').map((e) => e.textContent),
@@ -5478,7 +5478,7 @@ const clgf = createGameflow({ loadRecords: () => CLASH_DAYS, now: () => CLASH_BA
 clgf.mount()
 clgf.open()
 await tick()
-const clhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const clhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const clDays = clhost.all('gf-row-day')
 const clBlocks = clhost.all('gf-fight')
 const clLines = clBlocks.flatMap((b) => b.all('gf-fight-line').map((e) => e.textContent))
@@ -5541,7 +5541,7 @@ const cleangf = createGameflow({ loadRecords: () => CLASH_CLEAN, now: () => CLAS
 cleangf.mount()
 cleangf.open()
 await tick()
-const cleanhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const cleanhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('战斗：没撞过墙的那一天不会凭空打起来',
   cleanhost.all('gf-fight').length === 0
   && cleanhost.all('gf-fight-report').length === 0
@@ -5553,7 +5553,7 @@ const clgf2 = createGameflow({ loadRecords: () => CLASH_DAYS, now: () => CLASH_B
 clgf2.mount()
 clgf2.open()
 await tick()
-const clhost2 = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const clhost2 = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const clLines2 = clhost2.all('gf-fight').flatMap((b) => b.all('gf-fight-line').map((e) => e.textContent))
 check('战斗：同一份记录看两眼，这一场仗一个字都不变',
   clLines.length > 0 && clLines.join('\n') === clLines2.join('\n'),
@@ -5572,7 +5572,7 @@ const ggf = createGameflow({ loadRecords: () => CLASH_TODAY, now: () => CLASH_BA
 ggf.mount()
 ggf.open()
 await tick()
-const ghost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const ghost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const gRemarks = ghost.all('gf-remark').map((e) => e.textContent)
 check('战斗：梯子上那五分钟一格不挂（那是刻度，不是一天的讲法）',
   ghost.all('gf-fight').length === 0 && ghost.all('gf-row-day').length === 0,
@@ -5717,7 +5717,7 @@ const planGf = createGameflow({ loadRecords: () => PLAN_DAYS, now: () => CLASH_B
 planGf.mount()
 planGf.open()
 await tick()
-const planHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const planHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const planTexts = planHost.all('gf-plan-line').map((e) => e.textContent)
 const planRows = planHost.all('gf-row')
 const planDayRows = planRows.filter((r) => r.all('gf-plan-line').length > 0)
@@ -5742,7 +5742,7 @@ const planGf2 = createGameflow({ loadRecords: () => PLAN_DAYS, now: () => CLASH_
 planGf2.mount()
 planGf2.open()
 await tick()
-const planHost2 = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const planHost2 = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const planTexts2 = planHost2.all('gf-plan-line').map((e) => e.textContent)
 const planLoss2 = planHost2.all('gf-loss').map((e) => e.textContent)
 check('当日计划：同一份记录看两眼，打算与少一分那几句一个字都不变',
@@ -5781,7 +5781,7 @@ const markGf = createGameflow({ loadRecords: () => MARK_DAYS, now: () => NOW })
 markGf.mount()
 markGf.open()
 await tick()
-const khost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const khost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const kEchoes = khost.all('gf-mark-line').map((e) => e.textContent)
 check('痕迹：那一卷末尾挂着一句回声，就是这一天走的那条路留下的',
   khost.all('gf-row-day').length === 1 && kEchoes.length === 1
@@ -5797,7 +5797,7 @@ const markGf2 = createGameflow({ loadRecords: () => MARK_DAYS, now: () => NOW })
 markGf2.mount()
 markGf2.open()
 await tick()
-const khost2 = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const khost2 = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const kEchoes2 = khost2.all('gf-mark-line').map((e) => e.textContent)
 check('痕迹：同一份记录看两眼，这一句回声一字不变',
   kEchoes.length > 0 && kEchoes.join('\n') === kEchoes2.join('\n'),
@@ -5812,7 +5812,7 @@ const cleanMarkGf = createGameflow({ loadRecords: () => MARK_CLEAN, now: () => N
 cleanMarkGf.mount()
 cleanMarkGf.open()
 await tick()
-const cleanMarkHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const cleanMarkHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('痕迹：那一天没走到任何一条路上，一句回声都没有',
   cleanMarkHost.all('gf-mark-line').length === 0,
   `${cleanMarkHost.all('gf-row').length} 行里 ${cleanMarkHost.all('gf-mark-line').length} 句回声`)
@@ -5837,7 +5837,7 @@ const liveMarkGf = createGameflow({ loadRecords: () => MARK_LIVE, now: () => NOW
 liveMarkGf.mount()
 liveMarkGf.open()
 await tick()
-const lhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const lhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('痕迹：账还没结（岔口正摆在最新那一格上）时，一句回声都没有',
   lhost.all('gf-choice-pick').length === 2 && lhost.all('gf-mark-line').length === 0,
   `${lhost.all('gf-choice-pick').length} 颗选项 · ${lhost.all('gf-mark-line').length} 句回声`)
@@ -5901,7 +5901,7 @@ const ogf = createGameflow({ loadRecords: () => ORIGIN_TODAY, now: () => CLASH_B
 ogf.mount()
 ogf.open()
 await tick()
-const ohost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const ohost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const oRows = ohost.all('gf-row')
 const oLastRow = oRows[oRows.length - 1]
 const oBlocks = ohost.all('gf-origin')
@@ -5953,7 +5953,7 @@ const ogf2 = createGameflow({ loadRecords: () => ORIGIN_TODAY, now: () => CLASH_
 ogf2.mount()
 ogf2.open()
 await tick()
-const ohost2 = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const ohost2 = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const oLines2 = ohost2.all('gf-origin').flatMap((b) => b.all('gf-origin-line').map((e) => e.textContent))
 check('序曲：同一份记录看两眼，一个字都不变',
   oLines.length > 0 && oLines.join('\n') === oLines2.join('\n'),
@@ -5966,7 +5966,7 @@ const ogfOld = createGameflow({ loadRecords: () => ORIGIN_OLD, now: () => CLASH_
 ogfOld.mount()
 ogfOld.open()
 await tick()
-const ohostOld = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const ohostOld = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 check('序曲：存档里还有更早的日子，今天就不是头一天，序曲一个字都不说',
   ohostOld.all('gf-origin').length === 0 && ohostOld.all('gf-row').length === 1,
   `${ohostOld.all('gf-origin').length} 段序曲 / ${ohostOld.all('gf-row').length} 行（只有今天那一行）`)
@@ -6073,7 +6073,7 @@ const dgf = createGameflow({ loadRecords: () => DIR_DAYS, now: () => CLASH_BASE 
 dgf.mount()
 dgf.open()
 await tick()
-const dhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const dhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const dRows = dhost.all('gf-row')
 const dRolls = dRows.filter((r) => r.classList.contains('gf-row-roll'))
 const dCells = dRows.filter((r) => !r.classList.contains('gf-row-roll'))
@@ -6130,7 +6130,7 @@ const dgf2 = createGameflow({ loadRecords: () => DIR_DAYS, now: () => CLASH_BASE
 dgf2.mount()
 dgf2.open()
 await tick()
-const dhost2 = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const dhost2 = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const dText = dhost.all('gf-direction').map((e) => e.textContent)
 const dText2 = dhost2.all('gf-direction').map((e) => e.textContent)
 check('方向：同一份记录看两眼，抬头一个字都不变',
@@ -6166,7 +6166,7 @@ const keptStore = {
 }
 const keptGf = createGameflow({ loadRecords: () => [], now: () => NOW, storage: keptStore })
 keptGf.mount()
-const keptHost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const keptHost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const keptTrigger = () => keptHost.all('gf-voice-b')[0]
 const keptItems = () => keptHost.all('gf-style-item')
 check('上次挑的那套说法，打开时自己就讲上了（不用再点一次）',
@@ -6212,7 +6212,7 @@ packsMod.PACKS['smoke-locked'] = {
 }
 const lockedGf = createGameflow({ loadRecords: () => [], now: () => NOW, storage: null })
 lockedGf.mount()
-const lockedhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const lockedhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 const lockedOpen = () => lockedhost.all('gf-voice-b')[0].dispatch('click')
 const lockedItem = () => lockedhost.all('gf-style-item')
   .find((n) => n.getAttribute('data-voice') === 'locked')
@@ -6232,7 +6232,7 @@ const unlockedGf = createGameflow({
   loadRecords: () => [], now: () => NOW, storage: null, unlocked: ['smoke-locked'],
 })
 unlockedGf.mount()
-const unlockedhost = [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const unlockedhost = [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 unlockedhost.all('gf-voice-b')[0].dispatch('click')
 const unlockedItem = () => unlockedhost.all('gf-style-item')
   .find((n) => n.getAttribute('data-voice') === 'locked')
@@ -6260,7 +6260,7 @@ const startStub = {
   setItem: (k, v) => { startStore.set(k, String(v)) },
   removeItem: (k) => { startStore.delete(k) },
 }
-const hostNow = () => [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+const hostNow = () => [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
 
 const startGf = createGameflow({ loadRecords: () => [], now: () => NOW, storage: startStub })
 startGf.mount()
@@ -6715,7 +6715,7 @@ if (HAVE_MAP_FIXTURE) {
  * 读同一个数，下面四条就是钉住这件事的。
  * ------------------------------------------------------------------ */
 {
-  const hostNow = () => [...document.body.children].filter((c) => 'data-dsh-gameflow' in c.attributes).pop()
+  const hostNow = () => [...document.body.children].filter((c) => 'data-dsh-game-adventure' in c.attributes).pop()
   const badgeOn = (host) => {
     const one = host.all('gf-door-badge')[0]
     return !!one && one.hidden === false

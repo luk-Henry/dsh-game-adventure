@@ -29,7 +29,7 @@ const SRC = join(root, 'src', 'client.js')
 const OUT = join(root, 'lib', 'client.js')
 
 /** 包名，同时也是 ModuleLoader 的行 id。 */
-const ID = 'dsh-gameflow'
+const ID = 'dsh-game-adventure'
 
 /** 匹配顶层导出行，把 `export ` 摘掉并记下名字。 */
 const RE_FN = /^export\s+(async\s+function|function|class)\s+([A-Za-z_$][\w$]*)/
@@ -204,7 +204,7 @@ if (exported.length === 0) {
 const assignments = exported.map((n) => `    exports.${n} = ${n}`).join('\n')
 
 const out = `/*
- * dsh-gameflow · 浏览器半边（运行时装）
+ * dsh-game-adventure · 浏览器半边（运行时装）
  *
  * ⚠️ 这个文件是 scripts/build-client.mjs 从 src/client.js 生成的，不要手改。
  * 改 src/client.js，然后跑 \`node scripts/build-client.mjs\`。

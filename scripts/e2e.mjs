@@ -43,7 +43,7 @@ const lastAt = (r) => Number(r?.endedAt) || Number(r?.startedAt) || 0
 
 /* --- 0. 沙箱：一份自己合成的固定存档 -------------------------------- */
 
-const sandbox = join(tmpdir(), 'dsh-gameflow-e2e')
+const sandbox = join(tmpdir(), 'dsh-game-adventure-e2e')
 const sandboxStore = join(sandbox, 'gameflow', 'records.json')
 rmSync(sandbox, { recursive: true, force: true })
 mkdirSync(dirname(sandboxStore), { recursive: true })
@@ -138,7 +138,7 @@ host.apply(ctx)
 await new Promise((r) => setTimeout(r, 400)) // bootstrap 是 async 的，等它落定
 
 check('宿主半边注册了路由', captured !== null)
-check('路由形状对', captured?.kind === 'prefix' && captured?.path === '/dsh-gameflow',
+check('路由形状对', captured?.kind === 'prefix' && captured?.path === '/dsh-game-adventure',
   `${captured?.kind} ${captured?.path}`)
 check('宿主半边没报错', warnings.length === 0, warnings.join(' | '))
 
@@ -171,7 +171,7 @@ check('每条都有渲染要用的字段',
 /* --- 3b. 量尺寸：真 HTTP 走一圈（开关是主目录里的一个文件） --------- */
 
 {
-  const url = `${origin}/dsh-gameflow/measure`
+  const url = `${origin}/dsh-game-adventure/measure`
   const off = await realFetch(url).then((r) => r.json())
   check('量尺寸：默认是关的（插件本身不带这个行为）', off.on === false, JSON.stringify(off))
 
@@ -270,7 +270,7 @@ const hadOlder = seed.records.some((r) => lastAt(r) < dayFrom)
 // 所以按下那一刻之前攒的记录要**从存档里删掉**，并把起点记成 `dayStart`。
 // 这里按在「此刻」：今天早先那两段都结束在此刻之前，按完应当一条都不剩。
 const pressedAt = now0
-const pressRes = await realFetch(`${origin}/dsh-gameflow/start`, {
+const pressRes = await realFetch(`${origin}/dsh-game-adventure/start`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ at: pressedAt }),
@@ -285,7 +285,7 @@ check('按下开始冒险：起点之前就结束的记录一条不剩',
   JSON.parse(readFileSync(sandboxStore, 'utf8')).records.length === 0,
   `${JSON.parse(readFileSync(sandboxStore, 'utf8')).records.length} 条`)
 
-const polled = await realFetch(`${origin}/dsh-gameflow/records`).then((r) => r.json())
+const polled = await realFetch(`${origin}/dsh-game-adventure/records`).then((r) => r.json())
 check('取数据的应答带上 dayStart（界面靠它裁掉起点之前那几格）',
   polled.dayStart === pressedAt && Array.isArray(polled.records) && polled.records.length === 0,
   `dayStart=${polled.dayStart} records=${polled.records?.length}`)

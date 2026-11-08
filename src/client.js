@@ -1,6 +1,6 @@
 /**
  * 回望厅 · 浏览器半边
- * dsh-gameflow
+ * dsh-game-adventure
  *
  * 这个文件是**源码**，刻意写成零打包的纯 ES module：
  *   - 不 import 任何裸包名（不依赖 DSH 的模块表提供 react 之类的东西）；
@@ -8567,7 +8567,7 @@ function clashOf(unit, picked) {
 /**
  * `loadRecords` 交回来的东西有两种形状，都收：**一数组**（老写法、预览页、自检里那些
  * `loadRecords: () => demo`）或者**一份存档** `{ records, since, seam }`（宿主那条路由，
- * 见 src/index.js 的 `/dsh-gameflow/records`）。数组那种没有两个标量，退回 0/null，
+ * 见 src/index.js 的 `/dsh-game-adventure/records`）。数组那种没有两个标量，退回 0/null，
  * 于是序曲与「隔了一夜」按老规矩从记录里自己数——自检里那些夹具正是这么喂的。
  */
 function readStore(next) {
@@ -9459,7 +9459,7 @@ export function createGameflow(options = {}) {
     voice = DEFAULT_VOICE,
     loadRecords = async () => [],
     // 8 → 9：按下「开始冒险」时**通知宿主**（`(at) => Promise<boolean>`，见 src/index.js 的
-    // `POST /dsh-gameflow/start`）。不传（预览页、自检里那些夹具）就只记在本地那枚标记上，
+    // `POST /dsh-game-adventure/start`）。不传（预览页、自检里那些夹具）就只记在本地那枚标记上，
     // 行为跟从前一样——那颗按钮在这些地方本来也按不出什么结果来。
     startSession = null,
     container = document.body,
@@ -9671,7 +9671,7 @@ let liveSettleTimer = 0
   let measureTimer = null
 
   const host = document.createElement('div')
-  host.setAttribute('data-dsh-gameflow', '')
+  host.setAttribute('data-dsh-game-adventure', '')
   const shadow = host.attachShadow({ mode: 'open' })
 
   const style = document.createElement('style')
@@ -11231,9 +11231,9 @@ let liveSettleTimer = 0
 export const inject = []
 
 /** 宿主半边把记录挂在这条路由上（见 src/index.js）。 */
-const RECORDS_URL = '/dsh-gameflow/records'
+const RECORDS_URL = '/dsh-game-adventure/records'
 /** 8 → 9：按下「开始冒险」那条写路由（见 postStart 与 src/index.js 的 startDay）。 */
-const START_URL = '/dsh-gameflow/start'
+const START_URL = '/dsh-game-adventure/start'
 
 /**
  * 「量尺寸」的路由（见 `src/index.js` 里那一节）。
@@ -11243,7 +11243,7 @@ const START_URL = '/dsh-gameflow/start'
  * 截图里读不出「差 6px」，数字能。**开关在宿主那边（主目录里的一个文件），
  * 所以对装上插件的人完全不存在这个行为。**
  */
-const MEASURE_URL = '/dsh-gameflow/measure'
+const MEASURE_URL = '/dsh-game-adventure/measure'
 
 /** 能不能够到宿主：桌面上是相对 URL，`file://` 打开时（比如 preview.html）够不到。 */
 function canReachHost() {
@@ -11368,7 +11368,7 @@ export function apply(ctx) {
     ctx.effect(() => {
       gf.mount()
       return () => gf.destroy()
-    }, 'dsh-gameflow')
+    }, 'dsh-game-adventure')
   } else {
     gf.mount()
   }

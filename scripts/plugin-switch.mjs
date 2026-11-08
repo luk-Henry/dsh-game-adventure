@@ -1,4 +1,4 @@
-// 门后（dsh-gameflow）的开关：改 profile 里那一小段，把插件挂上去 / 摘下来。
+// 门后（dsh-game-adventure）的开关：改 profile 里那一小段，把插件挂上去 / 摘下来。
 //
 //   node scripts/plugin-switch.mjs            ← 不带参数：开 ⇄ 关 来回切
 //   node scripts/plugin-switch.mjs on|off     ← 直接指定
@@ -12,12 +12,12 @@
 //
 // 这一段用两条标记行圈起来，脚本整段重写，所以可以反复跑、不会越跑越乱：
 //
-//   # >>> dsh-gameflow 开关 >>>
+//   # >>> dsh-game-adventure 开关 >>>
 //   # [gameflow:ON]
 //   - insert:
-//       - id: dsh-gameflow
+//       - id: dsh-game-adventure
 //         name: "file:///D:/…/src/index.js"
-//   # <<< dsh-gameflow 开关 <<<
+//   # <<< dsh-game-adventure 开关 <<<
 //
 // 关掉的时候那三行会被注释起来（不是删掉），所以开回来一个字都不会错。
 import { execFileSync } from 'node:child_process'
@@ -25,12 +25,12 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-const HEAD = '# >>> dsh-gameflow 开关 >>>'
-const TAIL = '# <<< dsh-gameflow 开关 <<<'
+const HEAD = '# >>> dsh-game-adventure 开关 >>>'
+const TAIL = '# <<< dsh-game-adventure 开关 <<<'
 const FLAG_ON = '# [gameflow:ON]'
 const FLAG_OFF = '# [gameflow:OFF]'
-const ENTRY_ID = 'dsh-gameflow'
-const DEFAULT_ENTRY = 'file:///D:/文档合集/插件/dsh-gameflow/src/index.js'
+const ENTRY_ID = 'dsh-game-adventure'
+const DEFAULT_ENTRY = 'file:///D:/文档合集/插件/dsh-game-adventure/src/index.js'
 
 const args = process.argv.slice(2)
 const patchAt = (() => {
@@ -104,7 +104,7 @@ function readState(text) {
   const from = text.indexOf(HEAD)
   const to = text.indexOf(TAIL)
   if (from < 0 || to < 0) {
-    // 还没有标记：看看老的写法里有没有一条 dsh-gameflow 的 insert（第一次跑要做迁移）
+    // 还没有标记：看看老的写法里有没有一条 dsh-game-adventure 的 insert（第一次跑要做迁移）
     const legacy = new RegExp(`- insert:\\n\\s+- id: ${ENTRY_ID}\\n\\s+name: "([^"]+)"`)
     const hit = text.match(legacy)
     if (hit) return { state: 'on', entry: hit[1], legacy: true, span: null }

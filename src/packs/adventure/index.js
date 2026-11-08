@@ -1,5 +1,5 @@
 /**
- * 冒险者的事务所· dsh-gameflow 内容包
+ * 冒险者的事务所· dsh-game-adventure 内容包
  *
  * id=adventure  kind=world  voice=adventure  free=true
  *

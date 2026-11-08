@@ -1,10 +1,10 @@
 /**
- * dsh-gameflow —— host 半边。
+ * dsh-game-adventure —— host 半边。
  *
  * 它在 DSH 宿主进程里安静地做两件事：
  *
  *   1. 听会话的开始、事件和结束，攒下「哪天、坐了多久、在哪个项目、大概在忙什么」；
- *   2. 把攒下的东西用一条只读路由交给界面（`/dsh-gameflow/records`）。
+ *   2. 把攒下的东西用一条只读路由交给界面（`/dsh-game-adventure/records`）。
  *
  * 记录只落在本机，不联网，不上传。
  *
@@ -29,7 +29,7 @@ import zlib from 'node:zlib'
 const zstd = typeof zlib.zstdDecompressSync === 'function' ? zlib.zstdDecompressSync : null
 
 /** Cordis 插件名。 */
-const name = 'dsh-gameflow'
+const name = 'dsh-game-adventure'
 
 /**
  * 声明依赖的服务。
@@ -41,7 +41,7 @@ const name = 'dsh-gameflow'
 const inject = ['webServer']
 
 /** 界面取数据的路由前缀。 */
-const ROUTE_PATH = '/dsh-gameflow'
+const ROUTE_PATH = '/dsh-game-adventure'
 
 /** 本机回环地址的几种写法（IPv4、IPv6、以及 Node 在双栈上给的那种）。 */
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
@@ -256,7 +256,7 @@ async function readStore(file, warn) {
     raw = await readFile(file, 'utf8')
   } catch (error) {
     if (error?.code === 'ENOENT') return { records: [], since: 0, seam: null, dayStart: 0 }
-    warn?.(`dsh-gameflow: 读不了 ${file}，这一轮不落盘：${String(error)}`)
+    warn?.(`dsh-game-adventure: 读不了 ${file}，这一轮不落盘：${String(error)}`)
     return { records: [], since: 0, seam: null, dayStart: 0, blocked: true }
   }
   let parsed
@@ -268,9 +268,9 @@ async function readStore(file, warn) {
     try {
       saved = `${file}.corrupt-${corruptStamp()}`
       await rename(file, saved)
-      warn?.(`dsh-gameflow: ${file} 读不懂（${String(error)}），已改名留档：${saved}`)
+      warn?.(`dsh-game-adventure: ${file} 读不懂（${String(error)}），已改名留档：${saved}`)
     } catch (renameError) {
-      warn?.(`dsh-gameflow: ${file} 读不懂，改名留档也失败，这一轮不落盘：${String(renameError)}`)
+      warn?.(`dsh-game-adventure: ${file} 读不懂，改名留档也失败，这一轮不落盘：${String(renameError)}`)
     }
     return { records: [], ...meta, corrupt: true, blocked: saved === null }
   }
@@ -1139,7 +1139,7 @@ function apply(ctx) {
     if (pruned.records.length === 0 && !pruned.since && !pruned.seam) return
     await writeJsonAtomic(file, pruned)
   })().catch((error) => {
-    ctx.logger?.warn?.(`dsh-gameflow: 回填出错：${String(error)}`)
+    ctx.logger?.warn?.(`dsh-game-adventure: 回填出错：${String(error)}`)
   })
 
   let writing = bootstrap
@@ -1176,7 +1176,7 @@ function apply(ctx) {
     try {
       return fn()
     } catch (error) {
-      ctx.logger?.warn?.(`dsh-gameflow: ${label} 出错：${String(error)}`)
+      ctx.logger?.warn?.(`dsh-game-adventure: ${label} 出错：${String(error)}`)
       return undefined
     }
   }
@@ -1228,7 +1228,7 @@ function apply(ctx) {
     }
     arm()
     if (typeof ctx.effect === 'function') {
-      ctx.effect(() => () => clearTimeout(timer), 'dsh-gameflow.persist-timer')
+      ctx.effect(() => () => clearTimeout(timer), 'dsh-game-adventure.persist-timer')
     }
   })
 
@@ -1323,7 +1323,7 @@ function apply(ctx) {
         // 排进写盘链条：这一下也在改同一份文件，不能和定时落盘、回填抢。
         const task = writing.then(() => startDay(file, at, recorder, warn))
         writing = task.catch((error) => {
-          warn(`dsh-gameflow: 记下开始冒险失败：${String(error)}`)
+          warn(`dsh-game-adventure: 记下开始冒险失败：${String(error)}`)
         })
         try {
           const next = await task
@@ -1367,7 +1367,7 @@ function apply(ctx) {
   // `ctx.effect` 是 Cordis 的「可清理副作用」注册口。万一它不在（比如更老的运行时），
   // 就直接注册——路由少一次自动清理，也总好过插件加载失败拖垮整个 boot。
   guard('注册取数据的路由', () => {
-    if (typeof ctx.effect === 'function') ctx.effect(() => ctx.webServer.register(route), 'dsh-gameflow.route')
+    if (typeof ctx.effect === 'function') ctx.effect(() => ctx.webServer.register(route), 'dsh-game-adventure.route')
     else ctx.webServer.register(route)
   })
 }

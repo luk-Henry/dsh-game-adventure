@@ -1,4 +1,4 @@
-# dsh-gameflow 的 bundle patch。
+# dsh-game-adventure 的 bundle patch。
 #
 # 这一行把本包的 main 入口（src/index.js）作为 host 半边加载——它是一个普通的
 # Cordis 插件，跑在 DSH 宿主进程里，负责安静地记录，并把记录以只读路由交给界面。
@@ -10,5 +10,5 @@
 # 界面在这种情况下显示「还没有什么可回望的。」——空就是空，不塞假数据。
 
 - insert:
-    - id: dsh-gameflow
-      name: dsh-gameflow
+    - id: dsh-game-adventure
+      name: dsh-game-adventure
