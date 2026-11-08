@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>门后 · 界面预览</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background: #EDE9E1;
+    color: #6B6156;
+  }
+  /* 假装这是 DSH 的窗口，好看看毛玻璃透出来是什么样 */
+  .fake-dsh { position: fixed; inset: 0; overflow: hidden; }
+  .fake-dsh .bar { height: 44px; background: #E2DDD3; }
+  .fake-dsh .body { padding: 28px 32px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+  .fake-dsh .bubble { height: 34px; border-radius: 10px; background: #E3DED4; }
+  .note {
+    position: fixed; left: 32px; top: 68px; max-width: 460px;
+    font-size: 13px; line-height: 1.9; color: #8A7E70;
+  }
+  .note h1 { font-size: 15px; font-weight: 600; color: #3B3229; margin: 0 0 10px; letter-spacing: .04em; }
+  .note code { background: rgba(59,50,41,.07); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .switcher { position: fixed; left: 32px; bottom: 32px; display: flex; gap: 8px; align-items: center; font-size: 12px; }
+  .switcher + .switcher { bottom: 70px; }
+  .switcher button {
+    font: inherit; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+    border: 1px solid rgba(59,50,41,.18); background: rgba(255,255,255,.5); color: #6B5F52;
+  }
+  .switcher button[aria-pressed="true"] { background: #3B3229; color: #F7F3EC; border-color: #3B3229; }
+</style>
+</head>
+<body>
+
+<div class="fake-dsh">
+  <div class="bar"></div>
+  <div class="body">
+    <div class="bubble" style="width: 320px"></div>
+    <div class="bubble" style="width: 480px"></div>
+    <div class="bubble" style="width: 240px"></div>
+    <div class="bubble" style="width: 400px; background: #DCD6CA"></div>
+  </div>
+</div>
+
+<div class="note">
+  <h1>门后 · 界面预览</h1>
+  这是 <code>src/client.js</code> 的真实渲染（经 <code>lib/client.js</code> 打包后原样运行），喂的
+  是 2026-10-02 那台机器上真实回填出来的记录。<br>
+  右下角那扇小木门是真的可以点的：移上去会浮出「门后」，点开是一张地图加一条见闻录。<br>
+  地图是<b>运行时画出来的</b>（<code>src/map/</code> 那五件是 <code>.scratch/</code> 里那套 Python 渲染器的<br>
+  等值移植，进面板只灌进一个 <code>&lt;g&gt;</code>）：一整块大陆、东北三座离岛、一个内海、<br>
+  三条山系（沿脊线排成一串，不是散落的三角）、九片林子（一片林子一个整体）、三条河与三个湖、<br>
+  十四片地表（九种颜色）；<br>
+  四块地各有各的地表颜色（领地染色），<b>没有国界、也没有分界线</b>——分界靠笔法换了一种，说两遍反而把层次读断。<br>
+  画布本身就是内容（<code>VIEW</code> 是 <code>0 0 66 34</code>，没有一圈要裁掉的空白），<br>
+  上面是<b>二十座城的记号与国名</b>（一级国连名带徽记，二级国只留记号），<b>右下一枚磁针式指南针</b>（刻度圈加一根微微斜着的针，北半朱红；浅色墨画的，整枚都在画布里，天黑也不跟着暗）。<br>
+  还有<b>八处奇观</b>——世界之树、两座浮岛、大法师塔、龙骸、水晶脉、符文石、污染之地，<br>
+  每一处带一圈暖光晕与一圈虚线环，钉在已有地理上，不新开地。<br>
+  地点按各自的文化画成小符号——人类的红瓦小屋加方堡、精灵的白塔林（青绿洋葱顶）、<br>
+  矮人的山门要塞（一面峭壁加一道大拱）、兽人的圆顶大帐；另有草簇、冻原点、石纹、沙丘、冰裂这些<b>地貌笔触</b><br>
+  散在图上（世界图与细节版各按各的密度撒——细节版是 3×，所以草石沙冰都撒得密三倍）。<b>世界图上不画农田</b>，成片的犁田只在细节版那张地方图上。他本人不画出来，<br>
+  只用一枚朱红记号钉在他此刻待的地方，<b>旁边贴一个地名</b>——这枚记号<b>一直在图上，不许消失</b>：<br>
+  在城里就钉在那一座；出城那几件活（描残咒、送契书、下矿洞、拖法器、翻塔册、查夜哨）<br>
+  各有自己的野地落点，名字都是地图上真有的地方（乱石岗、霜原、地下矿洞、河湾、废塔、夜哨），<br>
+  连着几个钟头没有记录、他「出门了」的时候，钉在<b>他的屋子</b>；换地方的时候他是<b>走过去</b>的<br>
+  （按两地的距离算，1.2–3.6 秒），不是「刷」地跳过去；地图和下面那几行字是<b>左右对齐</b>的。<br>
+  <b>地图分两级</b>：全图里<b>点一下</b>就进<b>细节版</b>（不用滚轮——面板本身要滚动，滚轮会打架），<br>
+  <b>按住能拖</b>，<b>双击</b>回全图（右下角一颗「全图」小按钮、<b>Esc</b> 也算），<br>
+  右下角还留着一张 <b>112×58 的小全图</b>（一整幅世界图缩进去 ＋ 一个取景框 ＋ 一枚红点就是他，<br>
+  只在细节版里露出来），点哪儿看哪儿；他走出视野时视野跟着他走。<br>
+  细节版是<b>同一套地方图</b>（同一个坐标系，取景框 22 × 11.35，三倍线性分辨率；城墙、街道、广场、井、摊、<br>
+  按种族画的地标（一级镇两处，第二处是<b>望楼</b>）、<b>成片的犁田</b>（一片田庄＝三块错着角的田＋两捆禾，<br>
+  七道顺着长边的细犁沟；镇与镇之间的<b>土路</b>试过一版路网、当天就撤了——这张图上的山、树、房子都是立起来的物件，<br>
+  平铺在地面的一根线会横着压过山体，看着像贴在山坡上，没有高度场就宁可不画）、<br>
+  靠水镇子的<b>木栈桥与渔船</b>（桥根算到岸线、六块桥板两根桥桩；船是实心船身＋白帆＋红旗）、左上角一块题名框（<b>写的是这一带的大名</b>：有国家管着的地方写国家名，比如「河间王国」；<br>
+  远海、无人荒原那些没有国家管着的地方写那一片的海名或地貌名，比如「断桥海」）；<b>窗里出现的城一律按城画</b>（一级国大、二级国小），<br>
+  同一块地永远只有一种画法；<b>每座城——包括他站的那座——都在自己城旁边挂上名字牌</b>（比如「河间城」），<br>
+  题名框写哪个国家由「窗心最近的那座城」定（离最近的城超过十个世界单位就算没人管，改写那一片的大名），那只影响牌子上写谁，不影响画出来的镇子）。<br>
+  底下先垫<b>世界图自己的三倍</b>（借同一份 DOM，零成本、拖动时跟手），<b>松手 30 毫秒</b>才把地方图<br>
+  画进来（一扇 <b>2600～4100 个元素</b>——2026-10-09 先把图里那三千多条线段并成了几条 <code>&lt;path&gt;</code>（4702 → 2847），<br>
+  同一天又把四十块旧田换成一片片田庄，河间城 3766、古林之心 2614）——<b>缓存里已经有的那一扇当场就画、一秒不等</b>，<br>
+  松手也不再换地面（原来松手那一帧先把位图关掉、把世界图那层露出来、再换取景框，整块重栅格化一遍）；<b>拖的时候只挪便宜那层</b><br>
+  （实测挪世界图那层 252 帧掉 1 帧、真挪地方图那层掉 21 帧），所以拖动中地方图<b>真的不画</b><br>
+  （不是压透明度：压着它照样每帧重画 5686 个元素）、世界图顶上来，<b>记号、地名签、那盏灯跟地面<br>
+  走同一个位移</b>（不然地面在滑、记号钉在屏幕上不动，看着就是记号跟脚下的地对不上），松手才画新的那一扇。<br>
+  <b>取景框整扇必须落在世界图里</b>——拖到面板外面也不会把底下那张全图露出来（不然屏幕上会叠着两张地图）。<br>
+  拖动也<b>不会选中地图上的字</b>（那是浏览器自己的选中，用 <code>user-select: none</code> 关掉）。<br>
+  <b>拖的时候位置一帧只写一次</b>（鼠标一秒能报上千次，屏幕一秒只要 60 次——攒到下一帧一起写），<br>
+  并且整组换<b>快速栅格化</b>、把小全图那张也收起来（它里面又是一整份世界图），松手立刻恢复精细的那一套。<br>
+  再往后一步：<b>拖动的时候地面上顶上来一张预先烘好的位图</b>——第一次进细节版之后趁空闲把整张世界图 3 倍烘成一张 1524×786 的 PNG，<br>
+  拖动时露出来、把矢量那两层一起收起（烘不出来就一直走矢量，功能一样、只是慢）；那张图一上来，底下那两千多个元素<br>
+  浏览器就不再为它干活了（把基础世界图也藏掉实测一模一样）。<br>
+  画好之后它会在空闲时把<b>周围八扇</b>先建好（所以停一下再挪，多半是当场换）；<br>
+  拖动期间只认一条路：<b>手一停（24 毫秒没有新的鼠标位置）就把「松手多半会落的那一扇」先建上</b>——手一直在动时一片都不建。<br>
+  再往前两步：<b>面板一上来，他所在那一扇就已经排进队列了</b>（最可能被点的那一扇先建好）；<br>
+  <b>拖动里手一停 90 毫秒，也把那一扇先建上</b>（原来这个门槛是 160 毫秒）。<br>
+  记号、地名签、那盏灯浮在细节版上面，<b>在屏幕上不变大小</b>；跟着放大的只有地面<br>
+  （他脚下那块地补一个 1/3 的反缩放，所以他脚下那块地永远压在他记号底下）。<br>
+  <b>那枚记号一直轻轻上下浮动</b>——它原来是一跳一跳的（<code>steps(4)</code>，两秒半里只改四次值），<br>
+  因为动画每帧改值会让浏览器每帧重画整张 5817 个形状的地图；这一版把灯、记号、地名签<br>
+  <b>整组搬进自己的一张 SVG</b>（自己成一层，取景框跟地图永远同步），每帧只重画那一小层，<br>
+  浮动改回光滑（同样的两秒窗口，主线程从 1909ms 降到 587ms），<b>拖动地图时它们按停</b>。<br>
+  细节版那一份<b>不用 SVG 模糊</b>（一扇图里 93 道，一帧要 80 张离屏层），放大也拆成了<br>
+  「内容钉在窗心上、画一扇才写一次 ＋ 每帧只挪一层空的 <code>&lt;g&gt;</code>」——<br>
+  同一套探针扫下来，掉帧从 <b>91</b> 掉到 <b>0</b>（摘掉模糊逐像素比只差 1.98/255，看不出来）。<br>
+  <b>天黑的时候地图自己也暗下去</b>，而且是<b>提灯照地</b>：罩子不再是一块盖满的矩形，<br>
+  是以他为中心的一圈径向渐变——脚下透亮，到九个世界单位才暗到原来的程度，<br>
+  半径随时辰收放（傍晚铺得开、深夜只剩脚下那一圈）；木框、记号、那盏灯都还亮着。<br>
+  <b>细节版那张地方图也走同一套光池</b>——全图那圈与细节版那圈圆心都是<b>他脚下那块地自己</b>，<br>
+  半径按 3 倍反补，所以两块地在屏幕上是同一片光；全图那圈的圆心固定在他脚下那块地、<br>
+  只在换地方或换时辰时才写一次（值没变就不写属性）——那一处原来每帧重写，实测掉帧 10 → 0。<br>
+  细节版田里那 98 条犁沟（<code>.lf</code>）也补上了——它们的样式一直住在没人灌的 <code>LOCAL_CSS</code> 里，<br>
+  从画出来那天起一条都没显示过。<br>
+  <b>最上面就是地图</b>，底下每块都带自己的标签：<code>时间</code> / <code>位置</code> /<br>
+  见闻录（<code>你的日常</code> · <code>他的冒险</code>）——<b>不用点任何东西</b>，一眼看完。<br>
+  <b>他此刻那句话就写在见闻录最新一行的右栏里</b>（行首补一个「此刻」），不再单独占一行。<br>
+  见闻录<b>一行 = 一次坐下干活</b>（中间停 45 分钟以上、或一段干满 2 小时就另起一行），<br>
+  行首近两天写「今天 / 昨天 / 前天」；<br>
+  左栏<b>只用名词和数字</b>（哪个动作各几次、动了哪几个文件、待了多久），句子全在右栏；<br>
+  右栏那句话是<b>片段拼出来的</b>（同一天永远同一句，换一天才换），<b>不花一个 token</b>：<br>
+  每个动作底下有 <b>3–4 件不同的事</b>（一共二十件：抄咒文 / 誊符纸 / 改契书 / 补地图 / 试法器 /<br>
+  调机关 / 修炉子 / 翻卷轴 / 上架子 / 搬箱子 / 查册子 / 打听 / 问路 / 对说法 / 派同伴 / 分派路线 /<br>
+  贴招条 / 闲聊 / 听人说 / 搭话），每件事有自己的开头和收尾；<br>
+  同一件事有四档结局——<b>那天交出了东西</b>（去交活、拿几枚铜币）、<b>那天撞过墙</b>（工具报错过，<br>
+  他就挨了两下）、<b>做很多遍</b>（一半是「成了」，一半是没成）、<b>只做过一两次</b>（不吹成几十遍）；<br>
+  另外他那边还有一行更淡的<b>生活</b>（起得早、深夜还亮着窗、中间出去过一趟）——不是每行都有。<br>
+  <b>每一行都不一样</b>：整条见闻录是按顺序拼的，每一行的开头避开<b>用过</b>的开场、物件避开<b>最近三行</b>，<br>
+  <b>连着三行都在同一件事上就让第二件事顶上来</b>（位置也跟着换），同一句收尾在最近八行里不许重样；<br>
+  次数只出现在约三分之一的行里（报的是事，不是账）；标签上就是这二十种叫法。<br>
+  <b>位置和句子对得上</b>：他在<b>他的屋子</b>，说的就是屋里的事（吃饭、歇脚、收拾东西），<br>
+  不会地图上标着他的屋子、句子还在讲野地里翻箱子；落盘也<b>对齐到钟面的整五分</b>。<br>
+  左下角是<b>主题</b>那一组按钮，只换色板；说法（<b>故事风格</b>）不在这里换——
+  改说法的地方在门后那扇窗里「此刻」那一行的右端：那儿写着当前那一套的名字
+  （现在叫<b>奇幻冒险</b>，底下压着一条虚线：这儿能翻），点它弹出清单，
+  清单顶上写着「<b>换一种风格</b>」，里面只列其余几套（现在讲得出话的只有奇幻冒险一套，
+  另外列着三套<b>预留</b>的名字——规则怪谈、宫斗心计、谍战潜伏：只有名字、还没写，
+  点了不换说法，鼠标停上去浮出的也是它自己那一句；名字底下那一句「它的核」默认收着、
+  <b>点一下才摊开</b>，一次只摊一个），
+  鼠标移开一秒自己收。<br>
+  地图、他在哪儿、你说的那件事，两种主题里一模一样。</div>
+
+<div class="switcher" data-group="theme">
+  <span>主题</span>
+  <button type="button" data-theme="plain" aria-pressed="true">冒险者的事务所（免费）</button>
+  <button type="button" data-theme="classics" aria-pressed="false">古籍图书馆（付费 · 预览）</button>
+</div>
+
+<script>
+  // 预览页自己造一个 __ModuleLoader__，好让 DSH 里真正运行的东西——那个不带
+  // type="module" 的经典 script——在这里原样跑起来。预览的是真货，不是另写一份。
+  // 改完 src/client.js 记得先 `node scripts/build-client.mjs`。
+  window.__ModuleLoader__ = {
+    load(spec) {
+      window.__gameflowModule = spec.factory(() => {
+        throw new Error('预览页用不到 require')
+      })
+    },
+  }
+</script>
+<script src="./lib/client.js"></script>
+<script>
+const { createGameflow } = window.__gameflowModule
+
+const at = (daysAgo, h, m = 0) => {
+  const d = new Date()
+  d.setDate(d.getDate() - daysAgo)
+  d.setHours(h, m, 0, 0)
+  return d.getTime()
+}
+
+// 每五分钟一格、落在案上的那几格（用户 2026-10-08：「每5分钟落定一次时间，即记录在案」）。
+// 真记录里这一栏是宿主落的（见 src/index.js 的 landedCells）；四年前那份快照里没有这个
+// 字段，所以预览页按记录的样子补一份：从起点那格铺到终点那格，前面六成到八成填实。
+const cellsOf = (from, to, filled = 0.75) => {
+  const step = 5 * 60 * 1000
+  const out = []
+  for (let t = Math.floor(from / step) * step; t <= Math.floor(to / step) * step; t += step) out.push(t)
+  return out.slice(0, Math.max(1, Math.round(out.length * filled)))
+}
+
+// 一格一条明细（用户 2026-10-08 第 2 条：「时间从上而下应该是 10:00，9:55,9:50,9:45……」
+// ——一行人）。宿主真实落的形状见 src/index.js 的 ticksOf：
+// `{ at, actions, counts, files, fails, tags }`，`at` 是那一格对齐后的五分钟。
+// 这里按同样的形状补一份，并且**故意每三四格留一格空着**：那五分钟里什么都没发生，
+// 客户端照样给它铺一行，只是矮、安静（见 src/client.js 的 rowFor）。
+const ticksOf = (from, to, every = 3, counts = { 改文件: 1, 跑命令: 1 }, files = []) => {
+  const step = 5 * 60 * 1000
+  const out = []
+  let i = 0
+  for (let t = Math.floor(from / step) * step; t <= Math.floor(to / step) * step; t += step) {
+    i += 1
+    if (i % every === 0) continue
+    out.push({ at: t, actions: 3, counts, files, fails: 0, tags: Object.keys(counts) })
+  }
+  return out
+}
+
+// ?hour=23 把钟钉死在一刻上——只为看一眼「夜里那张地图」。
+// 2026-10-06 修入夜那层夜色时加的：白天跑预览页永远拿到 dusk = 0，核不了。
+//
+// **钉的必须是整页的钟，不只是面板那一只**：这份演示数据也是「相对现在」造的，
+// 只钉面板的话，数据落在钉死那刻的九小时之后，他会变成「出门了」，
+// 地图上连记号都没有——那就看不到夜里那盏灯了。
+const params = new URLSearchParams(location.search)
+const hourParam = params.get('hour')
+const pinned = (() => {
+  if (hourParam === null) return null
+  const h = Number(hourParam)
+  const d = new Date()
+  d.setHours(Number.isFinite(h) ? h : 0, 10, 0, 0)
+  return d.getTime()
+})()
+/** 整页共用的一只钟：不传 ?hour 就是真实时间。 */
+const CLOCK = pinned === null ? Date.now() : pinned
+
+// 四条记录：标题、交付物、帮手全是宿主本就有的元数据（标题现在不用了，留着当样本）。
+// counts/files/actions 是第三轮加的「你做了什么」的忠实版本——只有数字和路径。
+// 第一条的 endedAt 故意压到「两分钟前」，这样门一推开就能看见他正在地图上忙着；
+// 要是把时间钉死在 17:55，傍晚之后打开就只剩「他出门了，地图上找不到他」。
+// 2026-10-07：开始时间也改成相对现在（原来写死「今天 17:55」，不到 17:55 看这个预览，
+// 「此刻」那一行的区间会倒着写，比如 17:55 – 17:33）。
+const demo = [
+  {
+    id: 'demo-1',
+    startedAt: CLOCK - 35 * 60 * 1000,
+    endedAt: CLOCK - 2 * 60 * 1000,
+    minutes: 33,
+    title: '回顾厅',
+    tags: ['跑命令', '改文件', '翻文件'],
+    actions: 27,
+    counts: { 改文件: 12, 跑命令: 9, 翻文件: 6 },
+    files: [
+      'D:\\文档合集\\插件\\dsh-game-adventure\\src\\client.js',
+      'D:\\文档合集\\插件\\dsh-game-adventure\\scripts\\smoke.mjs',
+      'D:\\文档合集\\插件\\dsh-game-adventure\\README.md',
+    ],
+    deliverables: [
+      'D:\\文档合集\\插件\\dsh-game-adventure\\回望厅-设计文档.md',
+      'D:\\文档合集\\插件\\dsh-game-adventure\\README.md',
+    ],
+    helpers: ['Research DSH host plugin API', 'Research DSH client plugin API'],
+    fails: 3,
+    cells: cellsOf(CLOCK - 35 * 60 * 1000, CLOCK - 2 * 60 * 1000, 0.8),
+    ticks: ticksOf(CLOCK - 35 * 60 * 1000, CLOCK - 2 * 60 * 1000, 3,
+      { 改文件: 2, 跑命令: 1 }, ['D:\\文档合集\\插件\\dsh-game-adventure\\src\\client.js']),
+  },
+  {
+    id: 'demo-2', startedAt: at(1, 20, 2), endedAt: at(1, 20, 3), minutes: 1, tags: ['一小会儿'],
+    cells: cellsOf(at(1, 20, 2), at(1, 20, 3)),
+    // 一分钟的一段只有一格：也是梯子的第一行（老记录才是一张卡一行）。
+    ticks: ticksOf(at(1, 20, 2), at(1, 20, 3), 3, { 聊了聊: 1 }, []),
+  },
+  {
+    id: 'demo-3',
+    startedAt: at(2, 22, 14),
+    endedAt: at(2, 23, 4),
+    minutes: 50,
+    title: '方案',
+    tags: ['很晚了', '查资料', '改文件'],
+    actions: 9,
+    counts: { 改文件: 4, 查资料: 2 },
+    files: ['D:\\限载4人\\01_策划案v3.md'],
+    deliverables: ['D:\\限载4人\\01_策划案v3.md', 'D:\\限载4人\\01_策划案.md'],
+    cells: cellsOf(at(2, 22, 14), at(2, 23, 4), 0.7),
+    ticks: ticksOf(at(2, 22, 14), at(2, 23, 4), 3, { 改文件: 2, 查资料: 1 }, ['D:\\限载4人\\01_策划案v3.md']),
+  },
+  {
+    id: 'demo-4', startedAt: at(2, 21, 27), endedAt: at(2, 21, 38), minutes: 11,
+    cells: cellsOf(at(2, 21, 27), at(2, 21, 38)),
+    ticks: ticksOf(at(2, 21, 27), at(2, 21, 38), 3, { 翻文件: 1 }, []),
+  },
+]
+
+// ?theme=classics 换主题；?closed=1 停在收起态；?hour=23 把钟钉死（见上面）
+// 说法不在这里换：2026-10-05 起只有冒险这一套（案牍摘掉，收在 .parked/ledger-voice/），
+// 所以这里连说法这个参数都不传，直接用模块自己那套默认。
+const startTheme = params.get('theme') === 'classics' ? 'classics' : 'plain'
+
+// 预览页是一张「已经开场」的样张：2026-10-24 起（用户 m19006 / m19218），今天还没按过
+// 「开始冒险」的时候，面板只摆那一颗、一格都不铺——样张要看的是铺开之后的样子，
+// 所以给它一份假存储，只回答「今天已经按过」这一个键，别的一个都不写。
+const previewStore = {
+  getItem: (k) => (k === 'dsh.gameflow.started' ? String(new Date(CLOCK).setHours(0, 0, 0, 0)) : null),
+  setItem: () => {},
+  removeItem: () => {},
+}
+
+const gf = createGameflow({
+  theme: startTheme,
+  loadRecords: () => demo,
+  now: () => CLOCK,
+  storage: previewStore,
+})
+gf.mount()
+if (!params.has('closed')) gf.open()
+
+const state = { theme: startTheme }
+
+function paint() {
+  for (const btn of document.querySelectorAll('.switcher button')) {
+    btn.setAttribute('aria-pressed', String(btn.dataset.theme === state.theme))
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest && e.target.closest('.switcher button')
+  if (!btn) return
+  if (btn.dataset.theme) { state.theme = btn.dataset.theme; gf.setTheme(state.theme) }
+  paint()
+  // 插件对「点面板外」的处理就是关掉面板（在 DSH 里这是对的，那儿根本没有这排按钮），
+  // 预览页里点一下按钮会连带关掉，所以这里再推开一次。
+  gf.open()
+})
+
+paint()
+document.querySelector('.note').addEventListener('click', () => gf.close())
+</script>
+
+</body>
+</html>
