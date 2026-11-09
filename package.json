@@ -1,6 +1,6 @@
 {
   "name": "dsh-game-adventure",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "门后 — 右下角一扇安静的小木门，点开是一间屋子。你在这一头干活，他在那一头过日子，用的是同一个下午。零打扰、零压力、纯陪伴。",
   "type": "module",
   "license": "MIT",
