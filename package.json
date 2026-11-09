@@ -33,21 +33,26 @@
     "e2e": "node scripts/e2e.mjs",
     "prepublishOnly": "node scripts/build-client.mjs && node scripts/smoke.mjs && node scripts/verify-packs.mjs && node scripts/verify-rules.mjs && node scripts/e2e.mjs"
   },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "inject": [],
-      "platform": "web"
-    },
-    "manifestVersion": 1,
-    "compatibility": {
-      "dshReleases": {
-        "0.2.0-rc.2": "compatible"
-      }
+"dsh": {
+  "bundle": {
+    "patch": "./cordis.patch.yml"
+  },
+  "client": {
+    "inject": [],
+    "platform": "web"
+  },
+  "manifestVersion": 1,
+  "compatibility": {
+    "dshReleases": {
+      "0.2.0-rc.2": "compatible" 
     }
   },
+  "capabilities": {
+    "shell": {
+      "execute": true 
+    }
+  }
+}
   "keywords": [
     "dsh",
     "dsh-plugin",
