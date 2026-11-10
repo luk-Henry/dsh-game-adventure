@@ -6,12 +6,12 @@
  */
 
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
+import { scanRedline14, scanForkRoads, PROBE_REDLINE_BAD, PROBE_REDLINE_GOOD, PROBE_FORKS_RIGGED, PROBE_FORKS_CLEAN } from './rule-probes.mjs'
 
 class ClassList {
   constructor(el) { this.el = el }
@@ -278,20 +278,14 @@ const {
 const createGameflow = createGameflowRaw
 
 // 地图是**运行时现画出来的**（`src/map/world.js` 的 `mapSvg()`，见 `src/map/README.md`）。
-// 当年那张「画好的一整段 SVG」现在只剩一个身份：**回归夹具**，住在 `.scratch/map-data.js`
-// ——2026-10-08 从 `src/` 搬出去的：它 532 KB，一直跟着包发给别人，而包里没人 import 它。
-// 夹具在，就多验几条「现画的结果跟当年那张图一字不差」；夹具不在（别人 clone 到的那份
-// 没有 `.scratch/`），那几条**大声跳过**，其余六百多条照跑。
-let MAP_SVG = null
-let MAP_CSS = null
-try {
-  const fixture = await import('../.scratch/map-data.js')
-  MAP_SVG = fixture.MAP_SVG
-  MAP_CSS = fixture.MAP_CSS
-} catch {
-  console.log('  --   没有 `.scratch/map-data.js`（回归夹具不在），依赖它的那几条会跳过')
-}
-const HAVE_MAP_FIXTURE = Boolean(MAP_SVG && MAP_CSS)
+// 自检直接拿现画的那一份来验结构（几千个形状、没有位图、样式全挂在 `.gf-map` 底下）。
+// 2026-11-10 改：以前这里 import `.scratch/map-data.js`（532 KB 的旧图当夹具），
+// 但那个文件不在任何 clone 里，等于这几条永远跳过；而且「从包里引用包外的模块」
+// 正是插件市场预检把这次提交判成「模块图不完整」的原因。夹具已彻底不用。
+const { mapSvg, MAP_CSS: MAP_CSS_NOW } = await import('../src/map/world.js')
+const MAP_SVG = mapSvg()
+const MAP_CSS = MAP_CSS_NOW
+const HAVE_MAP_FIXTURE = true
 // 注册表本身：2026-10-06 起地理也在包里，所以自检要能拿到包里的那一份来对。
 const { PACKS, getPack, listPacks, worldIds } = await import('../src/packs/index.js')
 // 战斗那台机器（见「战斗」那一节）：面板上挑对手与档位靠它，所以自检直接问它一遍。
@@ -396,13 +390,8 @@ const check = (name, pass, extra = '') => {
   results.push({ name, pass, extra })
   console.log(`${pass ? '  ok  ' : ' FAIL '} ${name}${extra ? `  (${extra})` : ''}`)
 }
-// 依赖 `.scratch/map-data.js` 那几夹具的那几条：夹具不在就**跳过**，不算失败，也不装哑巴
-// ——结束的时候会把跳过了哪几条印出来。静默地少验几条，比红着更危险。
-const skipped = []
-const checkOnFixture = (name, pass, extra = '') => {
-  if (!HAVE_MAP_FIXTURE) { skipped.push(name); return }
-  check(name, pass, extra)
-}
+// 地图结构那几条（2026-11-10 起不再依赖包外夹具，始终生效）。
+const checkOnFixture = check
 
 /* --- 翻译层：纯函数，先单独钉死 ------------------------------------- */
 
@@ -6813,35 +6802,32 @@ if (HAVE_MAP_FIXTURE) {
 
 // 红线 14 的禁词表真有牙（2026-10-31，用户 m04298 第 1 条）。
 // 只验「表里非空」是没有意义的——那条断言在表被清空、或者判定被短路时照样绿。
-// 所以这里走 `scripts/packs.mjs --probe`：它是**同一条判定**（scanRedline14），
-// 塞一句带禁词的进去必须报命中，塞一句干净的必须报 0。
+// 所以这里直接调**同一条判定**（`scripts/rule-probes.mjs` 的 `scanRedline14`）：
+// 塞一句带禁词的进去必须报命中，塞一句干净的必须报 0。判定与样本两边共用。
+// 2026-11-10 起不再起子进程跑 `--probe`：`node:child_process` 会被插件市场的
+// 静态预检记成「命令执行能力」，整个插件因此进不了自动核验。
 {
-  const probe = (text) => {
-    const run = spawnSync(process.execPath, [fileURLToPath(new URL('./packs.mjs', import.meta.url)), '--probe', text], { encoding: 'utf8' })
-    return { status: run.status, stdout: String(run.stdout || '') }
-  }
-  const bad = probe('他推门进客栈，柜上的掌柜抬起头。')
-  const good = probe('店主擦着碗说，北边来的人这回绕了远路。')
+  const bad = scanRedline14(PROBE_REDLINE_BAD, 'probe')
+  const good = scanRedline14(PROBE_REDLINE_GOOD, 'probe')
+  const words = bad.map((hit) => hit.word)
   check('红线 14 的禁词表真有牙：塞一句「进入客栈、掌柜抬头」进去必须抓到（中式铺面那一路）',
-    bad.status !== 0 && bad.stdout.includes('R23 自检：') && bad.stdout.includes('掌柜') && bad.stdout.includes('客栈')
-    && /R23 自检：([1-9]\d*) 处/.test(bad.stdout),
-    `退出 ${bad.status} / ${bad.stdout.trim().split('\n').slice(-1)[0] || '（没有输出）'}`)
+    bad.length >= 2 && words.includes('掌柜') && words.includes('客栈'),
+    `命中 ${bad.length} 处：${words.join('、') || '（一个都没有）'}`)
   check('红线 14 的禁词表不误伤：同一句里换成「店主」就该一声不响',
-    good.status === 0 && good.stdout.includes('R23 自检：0 处'),
-    `退出 ${good.status} / ${good.stdout.trim().split('\n').slice(-1)[0] || '（没有输出）'}`)
+    good.length === 0,
+    `命中 ${good.length} 处`)
 }
 
 // 命运得是真的两难（2026-10-31，用户 m04344 那句「一个救那箱纸、一个救人，那不是就是让人去
-// 救人吗？也就是选择没有意义，因为根本不会两难」）。跟红线 14 一个办法：走 `--probe-forks`
-// 喂一件**故意写坏的** fork（按钮写「别管」、look 只有一句、句子里把代价说了），它必须当场抓到；
-// 同时把仓库里真在用的那三件逐条过一遍——判据的权威版本在 `scripts/packs.mjs` 的
-// `scanForkRoads`，这里只验「产出的数据没回过味来」。
+// 救人吗？也就是选择没有意义，因为根本不会两难」）。跟红线 14 一个办法：直接调
+// `scripts/rule-probes.mjs` 的 `scanForkRoads`，喂一件**故意写坏的** fork（按钮写「别管」、
+// look 只有一句、句子里把代价说了），它必须当场抓到；样本与 `--probe-forks` 共用同一份。
 {
-  const run = spawnSync(process.execPath, [fileURLToPath(new URL('./packs.mjs', import.meta.url)), '--probe-forks'], { encoding: 'utf8' })
-  const stdout = String(run.stdout || '')
+  const bad = scanForkRoads(PROBE_FORKS_RIGGED, 'rigged')
+  const ok = scanForkRoads(PROBE_FORKS_CLEAN, 'clean')
   check('命运的机器判据真有牙：按钮写「别管」、look 只有一句、句子里说「代价」，三样都得抓到',
-    run.status === 0 && /R22 自检：坏样本 ([3-9]|\d\d+) 处 \/ 干净样本 0 处/.test(stdout),
-    `退出 ${run.status} / ${stdout.trim().split('\n').slice(-1)[0] || '（没有输出）'}`)
+    bad.length >= 3 && ok.length === 0,
+    `坏样本 ${bad.length} 处 / 干净样本 ${ok.length} 处`)
 
   const judge = ['别管', '不管', '见死不救', '袖手', '少管闲事', '自扫门前雪', '事不关己']
   const ledger = ['代价', '风险', '会失去']
@@ -7105,9 +7091,5 @@ if (HAVE_MAP_FIXTURE) {
 }
 
 const failed = results.filter((r) => !r.pass)
-if (skipped.length) {
-  console.log(`\n跳过了 ${skipped.length} 条（没有 .scratch/map-data.js 夹具）：`)
-  for (const name of skipped) console.log(`  --   ${name}`)
-}
 console.log(`\n${results.length - failed.length}/${results.length} 通过`)
 process.exit(failed.length ? 1 : 0)

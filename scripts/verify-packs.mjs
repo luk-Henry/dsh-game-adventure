@@ -16,6 +16,7 @@
  *   node scripts/verify-packs.mjs
  */
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { applyPack, PACKS } from '../src/packs/index.js'
 
 const gf = await import('../src/client.js')
@@ -106,16 +107,22 @@ try {
 
   // 地理那一层（2026-10-06 搬进包）：地图、取景框、地点。**底子里已经没有这一份了**
   // （`SOURCE_CONTENT` 只管句子），所以这里对的是「包 = 面板读的」两段，
-  // 外加「包里的地图 = 素材文件本身」（不许两处各写一遍）。
-  // 2026-10-08：这份夹具从 `src/map-data.js` 搬到了 `.scratch/map-data.js`——它是
-  // 532 KB 的死数据，一直跟着包发给别人，而包里根本没人 import 它（`package.json` 的
-  // `files` 含 `"src"`，`.scratch/` 在它之外）。它现在的唯一身份是「运行时现画的
-  // 结果 == 当年那张图」的物证。
-  const { MAP_SVG, MAP_CSS } = await import('../.scratch/map-data.js')
+  // 外加「包里的地图 = 运行时现画的那一张」（不许两处各写一遍）。
+  // 2026-11-10：原来这里 import `.scratch/map-data.js`（532 KB 旧图当夹具）逐字比对。
+  // 那个文件不在任何 clone 里，脚本一跑就 `Cannot find module`——插件市场的静态预检
+  // 也正是把它记成「打包面里有模块指向包外」（SUBMISSION_SCAN_INCOMPLETE）。夹具删掉，
+  // 换成「现画一次 + 摘要钉住」：图要是漂了，这里照样红，仓库里却不再有包外引用。
+  const { mapSvg, MAP_CSS: MAP_CSS_NOW } = await import('../src/map/world.js')
   const { getPack } = await import('../src/packs/index.js')
   const pack = getPack('adventure')
-  assert.equal(pack.map.svg, MAP_SVG)
-  assert.equal(pack.map.css, MAP_CSS)
+  assert.equal(pack.map.svg, mapSvg(), '包里的地图不是 src/map/world.js 现画的那一份')
+  assert.equal(pack.map.css, MAP_CSS_NOW, '包里的地图样式不是 src/map/world.js 的那一份')
+  // 期望摘要：2026-11-10 复核的那一版（地图 554,732 字 / 样式 607 字）。
+  // **有意改地图就同步改这两行**——这正是原来的夹具唯一在做的事。
+  assert.equal(createHash('sha256').update(pack.map.svg).digest('hex'),
+    'c8140ea7bae40caaaf4dcbe869616efd1f89ab3a352697b9fb47f5e9b8c33650', '地图内容漂了')
+  assert.equal(createHash('sha256').update(pack.map.css).digest('hex'),
+    '8b2089fc13e182557479937547710f2df4341f459b9cafd6f05d5b80c06b4cab', '地图样式漂了')
   assert.deepStrictEqual(target.PLACES, pack.places)
   assert.deepStrictEqual(target.VIEW, pack.map.view)
   assert.deepStrictEqual(gf.PLACES, pack.places)

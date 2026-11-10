@@ -76,9 +76,12 @@ dsh plugin remove dsh-game-adventure
 ```bash
 node scripts/build-client.mjs   # 重建 lib/client.js
 node scripts/smoke.mjs          # 断言
-node scripts/look.mjs           # 四个窗口尺寸的版面
+node scripts/verify-packs.mjs   # 包与面板读的是同一份（含地图摘要）
 node scripts/e2e.mjs            # 真链路（跑完确认没动你那份 records.json）
 ```
+
+（`node scripts/look.mjs` 与 `scripts/plugin-switch.mjs` 是本机调试工具：前者要本机 Edge 截图，
+后者会动已安装的那份插件副本。它们不随包发布，也不参与自检。）
 
 ---
 

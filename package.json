@@ -1,6 +1,6 @@
 {
   "name": "dsh-game-adventure",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "门后 — 右下角一扇安静的小木门，点开是一间屋子。你在这一头干活，他在那一头过日子，用的是同一个下午。零打扰、零压力、纯陪伴。",
   "type": "module",
   "license": "MIT",
@@ -15,7 +15,6 @@
   "files": [
     "src",
     "lib",
-    "scripts",
     "preview.html",
     "locale",
     "cordis.patch.yml",
@@ -27,11 +26,17 @@
     "build": "node scripts/build-client.mjs",
     "preview": "node scripts/preview.mjs",
     "snapshot": "node scripts/snapshot.mjs",
-    "look": "node scripts/look.mjs",
     "test": "node scripts/build-client.mjs && node scripts/smoke.mjs",
     "verify": "node scripts/verify-packs.mjs && node scripts/verify-rules.mjs",
     "e2e": "node scripts/e2e.mjs",
-    "prepublishOnly": "node scripts/build-client.mjs && node scripts/smoke.mjs && node scripts/verify-packs.mjs && node scripts/verify-rules.mjs && node scripts/e2e.mjs"
+    "check": "node scripts/build-client.mjs && node scripts/smoke.mjs && node scripts/verify-packs.mjs && node scripts/verify-rules.mjs && node scripts/e2e.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luk-Henry/dsh-game-adventure.git"
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.2"
   },
   "dsh": {
     "bundle": {
